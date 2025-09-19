@@ -215,14 +215,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (Array.isArray(data.peers)) {
       data.peers.forEach(peerId => {
         addParticipant(peerId);
-        createPeerAndOffer(peerId);
+        // Only create offer if our socket ID is "greater" to avoid race conditions
+        if (socket.id > peerId) {
+          log(`Creating offer to existing peer ${peerId} (${socket.id} > ${peerId})`);
+          createPeerAndOffer(peerId);
+        } else {
+          log(`Waiting for offer from existing peer ${peerId} (${socket.id} < ${peerId})`);
+          // Just create the peer connection, wait for their offer
+          createPeerConnectionFor(peerId);
+        }
       });
     }
   });
-  
+
   socket.on('new-peer', async (data) => {
     log('New peer joined:', data.peer);
     addParticipant(data.peer);
+    // Always create offer to new peers (they just joined, so they wait for offers)
     await createPeerAndOffer(data.peer);
   });
   
@@ -310,7 +319,16 @@ document.addEventListener('DOMContentLoaded', () => {
       localVideo.srcObject = localStream;
       localBadge.textContent = 'Live';
       localBadge.className = 'badge live';
-      
+
+      // Log local stream details
+      log('Local stream initialized:', {
+        id: localStream.id,
+        tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState }))
+      });
+
+      // Add tracks to any existing peer connections
+      addTracksToExistingPeers();
+
       // Join room
       socket.emit('join', { room, name: `User ${socket.id?.slice(0, 8) || 'Unknown'}` });
       joined = true;
@@ -430,19 +448,55 @@ document.addEventListener('DOMContentLoaded', () => {
   // WebRTC functions
   async function createPeerAndOffer(targetSid) {
     try {
+      // Ensure we have local stream before creating offer
+      if (!localStream || localStream.getTracks().length === 0) {
+        log(`No local stream available for offer to ${targetSid}, retrying in 1 second...`);
+        setTimeout(() => createPeerAndOffer(targetSid), 1000);
+        return;
+      }
+
       const pc = createPeerConnectionFor(targetSid);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      
+
       socket.emit('offer', {
         to: targetSid,
         sdp: pc.localDescription
       });
-      
+
       log(`Sent offer to ${targetSid}`);
     } catch (error) {
       log('Error creating offer:', error);
+      showNotification(`Failed to create offer to ${targetSid}`, 'error');
     }
+  }
+
+  function addTracksToExistingPeers() {
+    if (!localStream) return;
+
+    Object.keys(pcs).forEach(remoteSid => {
+      const pc = pcs[remoteSid];
+      if (pc && pc.connectionState !== 'closed') {
+        // Check if tracks are already added
+        const senders = pc.getSenders();
+        const hasVideo = senders.some(sender => sender.track && sender.track.kind === 'video');
+        const hasAudio = senders.some(sender => sender.track && sender.track.kind === 'audio');
+
+        localStream.getTracks().forEach(track => {
+          const trackExists = senders.some(sender => sender.track === track);
+          if (!trackExists) {
+            if ((track.kind === 'video' && !hasVideo) || (track.kind === 'audio' && !hasAudio)) {
+              try {
+                pc.addTrack(track, localStream);
+                log(`Added ${track.kind} track to existing peer ${remoteSid}`);
+              } catch (e) {
+                log(`Error adding ${track.kind} track to ${remoteSid}:`, e);
+              }
+            }
+          }
+        });
+      }
+    });
   }
   
   function createPeerConnectionFor(remoteSid) {
@@ -460,12 +514,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const pc = new RTCPeerConnection(config);
     pcs[remoteSid] = pc;
 
-    // Add local stream tracks
-    if (localStream) {
+    // Add local stream tracks if available
+    if (localStream && localStream.getTracks().length > 0) {
       localStream.getTracks().forEach(track => {
         log(`Adding ${track.kind} track to peer connection for ${remoteSid}`);
-        pc.addTrack(track, localStream);
+        try {
+          pc.addTrack(track, localStream);
+        } catch (e) {
+          log(`Error adding ${track.kind} track for ${remoteSid}:`, e);
+        }
       });
+    } else {
+      log(`No local stream available when creating peer connection for ${remoteSid}`);
     }
 
     // Handle ICE candidates
@@ -530,10 +590,21 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleOffer(data) {
     try {
       log(`Handling offer from ${data.from}`);
-      const pc = createPeerConnectionFor(data.from);
+
+      // Get or create peer connection
+      let pc = pcs[data.from];
+      if (!pc) {
+        pc = createPeerConnectionFor(data.from);
+      } else if (pc.signalingState !== 'stable') {
+        log(`Peer connection with ${data.from} not in stable state: ${pc.signalingState}, recreating...`);
+        pc = createPeerConnectionFor(data.from);
+      }
 
       log(`Setting remote description for ${data.from}`);
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+      // Process any pending ICE candidates
+      await processPendingCandidates(data.from);
 
       log(`Creating answer for ${data.from}`);
       const answer = await pc.createAnswer();
@@ -549,6 +620,19 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       log(`Error handling offer from ${data.from}:`, error);
       showNotification(`Failed to connect to ${data.from}`, 'error');
+
+      // Try to recover by recreating the peer connection
+      try {
+        log(`Attempting to recover connection with ${data.from}`);
+        const pc = createPeerConnectionFor(data.from);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('answer', { to: data.from, sdp: pc.localDescription });
+        log(`Recovery successful for ${data.from}`);
+      } catch (recoveryError) {
+        log(`Recovery failed for ${data.from}:`, recoveryError);
+      }
     }
   }
   
@@ -561,6 +645,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pc.signalingState === 'have-local-offer') {
           log(`Setting remote description (answer) for ${data.from}`);
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+          // Process any pending ICE candidates
+          await processPendingCandidates(data.from);
+
           log(`Successfully set remote description for ${data.from}`);
         } else {
           log(`Ignoring answer from ${data.from} - wrong signaling state: ${pc.signalingState}`);
@@ -578,10 +666,38 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const pc = pcs[data.from];
       if (pc && data.candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        // Only add ICE candidate if remote description is set
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          log(`Added ICE candidate from ${data.from}`);
+        } else {
+          log(`Queuing ICE candidate from ${data.from} - no remote description yet`);
+          // Store candidate for later if remote description isn't set yet
+          if (!pc.pendingCandidates) {
+            pc.pendingCandidates = [];
+          }
+          pc.pendingCandidates.push(data.candidate);
+        }
+      } else {
+        log(`No peer connection found for ICE candidate from ${data.from}`);
       }
     } catch (error) {
-      log('Error handling ICE candidate:', error);
+      log(`Error handling ICE candidate from ${data.from}:`, error);
+    }
+  }
+
+  async function processPendingCandidates(remoteSid) {
+    const pc = pcs[remoteSid];
+    if (pc && pc.pendingCandidates && pc.remoteDescription) {
+      log(`Processing ${pc.pendingCandidates.length} pending candidates for ${remoteSid}`);
+      for (const candidate of pc.pendingCandidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (error) {
+          log(`Error adding pending candidate for ${remoteSid}:`, error);
+        }
+      }
+      pc.pendingCandidates = [];
     }
   }
   
