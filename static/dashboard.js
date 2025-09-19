@@ -111,27 +111,56 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch(`/engagement/${room}`);
       const data = await response.json();
-      
+
+      console.log('Engagement data received:', data);
+
       if (data.leaderboard) {
         updateLeaderboard(data.leaderboard);
       }
-      
+
       if (data.speaking_distribution) {
         updateSpeakingDistribution(data.speaking_distribution);
       }
-      
-      // Update metrics
-      if (data.leaderboard.length > 0) {
-        const avgEngagement = data.leaderboard.reduce((sum, p) => sum + p.engagement_score, 0) / data.leaderboard.length;
-        const avgAttention = data.leaderboard.reduce((sum, p) => sum + p.avg_attention, 0) / data.leaderboard.length;
-        
-        document.getElementById('engagementScore').textContent = Math.round(avgEngagement * 100) + '%';
-        document.getElementById('avgAttention').textContent = Math.round(avgAttention * 100) + '%';
-        document.getElementById('participantCount').textContent = data.leaderboard.length;
+
+      // Update metrics with proper error checking
+      const participantCountEl = document.getElementById('participantCount');
+      const engagementScoreEl = document.getElementById('engagementScore');
+      const avgAttentionEl = document.getElementById('avgAttention');
+
+      if (data.leaderboard && data.leaderboard.length > 0) {
+        const avgEngagement = data.leaderboard.reduce((sum, p) => sum + (p.engagement_score || 0), 0) / data.leaderboard.length;
+        const avgAttention = data.leaderboard.reduce((sum, p) => sum + (p.avg_attention || 0), 0) / data.leaderboard.length;
+
+        if (engagementScoreEl) engagementScoreEl.textContent = Math.round(avgEngagement * 100) + '%';
+        if (avgAttentionEl) avgAttentionEl.textContent = Math.round(avgAttention * 100) + '%';
+        if (participantCountEl) participantCountEl.textContent = data.leaderboard.length;
+
+        console.log(`Metrics updated: ${data.leaderboard.length} participants, ${Math.round(avgEngagement * 100)}% engagement, ${Math.round(avgAttention * 100)}% attention`);
+      } else {
+        // Set default values when no data
+        if (participantCountEl) participantCountEl.textContent = data.total_participants || 0;
+        if (engagementScoreEl) engagementScoreEl.textContent = '—';
+        if (avgAttentionEl) avgAttentionEl.textContent = '—';
       }
-      
+
+      // Update meeting duration
+      if (data.meeting_duration) {
+        const durationEl = document.getElementById('meetingDuration');
+        if (durationEl) {
+          durationEl.textContent = formatTime(data.meeting_duration);
+        }
+      }
+
     } catch (error) {
       console.error('Error loading engagement data:', error);
+      // Set error state for metrics
+      const participantCountEl = document.getElementById('participantCount');
+      const engagementScoreEl = document.getElementById('engagementScore');
+      const avgAttentionEl = document.getElementById('avgAttention');
+
+      if (participantCountEl) participantCountEl.textContent = '—';
+      if (engagementScoreEl) engagementScoreEl.textContent = '—';
+      if (avgAttentionEl) avgAttentionEl.textContent = '—';
     }
   }
 
@@ -140,25 +169,33 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch(`/sentiment/${room}`);
       const data = await response.json();
 
+      console.log('Sentiment data received:', data);
+
       if (data.sentiment_history && data.sentiment_history.length > 0) {
         updateSentimentChart(data.sentiment_history);
         updateSentimentStats(data);
       } else {
-        // If no sentiment data, try to get it from the sentiment analysis module
-        try {
-          const sentimentResponse = await fetch(`/sentiment/${room}`);
-          const sentimentData = await sentimentResponse.json();
-          if (sentimentData.sentiment_history) {
-            updateSentimentChart(sentimentData.sentiment_history);
-            updateSentimentStats(sentimentData);
-          }
-        } catch (e) {
-          console.log('No sentiment data available yet');
-        }
+        console.log('No sentiment data available yet');
+        // Set default values
+        const positiveEl = document.getElementById('positivePercent');
+        const neutralEl = document.getElementById('neutralPercent');
+        const negativeEl = document.getElementById('negativePercent');
+
+        if (positiveEl) positiveEl.textContent = '0%';
+        if (neutralEl) neutralEl.textContent = '0%';
+        if (negativeEl) negativeEl.textContent = '0%';
       }
 
     } catch (error) {
       console.error('Error loading sentiment data:', error);
+      // Set error state
+      const positiveEl = document.getElementById('positivePercent');
+      const neutralEl = document.getElementById('neutralPercent');
+      const negativeEl = document.getElementById('negativePercent');
+
+      if (positiveEl) positiveEl.textContent = '—';
+      if (neutralEl) neutralEl.textContent = '—';
+      if (negativeEl) negativeEl.textContent = '—';
     }
   }
 
@@ -178,15 +215,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadMeetingMetrics() {
     try {
-      const response = await fetch(`/health`);
+      // Get meeting metrics from engagement endpoint which has duration
+      const response = await fetch(`/engagement/${room}`);
       const data = await response.json();
-      
-      // Update meeting duration (this would need to be tracked properly)
-      // For now, we'll use a placeholder
-      updateMeetingDuration();
-      
+
+      console.log('Meeting metrics data:', data);
+
+      // Update meeting duration
+      if (data.meeting_duration) {
+        const durationEl = document.getElementById('meetingDuration');
+        if (durationEl) {
+          durationEl.textContent = formatTime(data.meeting_duration);
+        }
+      }
+
+      // Update participant count
+      if (data.total_participants !== undefined) {
+        const participantCountEl = document.getElementById('participantCount');
+        if (participantCountEl) {
+          participantCountEl.textContent = data.total_participants;
+        }
+      }
+
     } catch (error) {
       console.error('Error loading meeting metrics:', error);
+      // Set default values on error
+      const durationEl = document.getElementById('meetingDuration');
+      if (durationEl) {
+        durationEl.textContent = '—';
+      }
     }
   }
 
@@ -267,6 +324,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateSentimentStats(sentimentData) {
+    console.log('Updating sentiment stats with data:', sentimentData);
+
     const overall = sentimentData.overall_sentiment || 'neutral';
     const history = sentimentData.sentiment_history || [];
 
@@ -281,6 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const total = history.length;
+    console.log(`Sentiment analysis: ${positive} positive, ${neutral} neutral, ${negative} negative out of ${total} total`);
 
     // Update overall sentiment
     const overallEl = document.getElementById('overallSentiment');
@@ -299,31 +359,30 @@ document.addEventListener('DOMContentLoaded', () => {
       emojiEl.textContent = emojiMap[overall] || '😐';
     }
 
-    // Update percentages
-    if (total > 0) {
-      const positivePercent = Math.round((positive / total) * 100);
-      const neutralPercent = Math.round((neutral / total) * 100);
-      const negativePercent = Math.round((negative / total) * 100);
+    // Update percentages - ALWAYS update, even if total is 0
+    const positivePercent = total > 0 ? Math.round((positive / total) * 100) : 0;
+    const neutralPercent = total > 0 ? Math.round((neutral / total) * 100) : 0;
+    const negativePercent = total > 0 ? Math.round((negative / total) * 100) : 0;
 
-      const positiveEl = document.getElementById('positivePercent');
-      const neutralEl = document.getElementById('neutralPercent');
-      const negativeEl = document.getElementById('negativePercent');
+    const positiveEl = document.getElementById('positivePercent');
+    const neutralEl = document.getElementById('neutralPercent');
+    const negativeEl = document.getElementById('negativePercent');
 
-      if (positiveEl) positiveEl.textContent = `${positivePercent}%`;
-      if (neutralEl) neutralEl.textContent = `${neutralPercent}%`;
-      if (negativeEl) negativeEl.textContent = `${negativePercent}%`;
-
-      console.log(`Sentiment percentages updated: ${positivePercent}% positive, ${neutralPercent}% neutral, ${negativePercent}% negative`);
-    } else {
-      // No data available
-      const positiveEl = document.getElementById('positivePercent');
-      const neutralEl = document.getElementById('neutralPercent');
-      const negativeEl = document.getElementById('negativePercent');
-
-      if (positiveEl) positiveEl.textContent = '0%';
-      if (neutralEl) neutralEl.textContent = '0%';
-      if (negativeEl) negativeEl.textContent = '0%';
+    if (positiveEl) {
+      positiveEl.textContent = `${positivePercent}%`;
+      console.log(`Set positive percentage to: ${positivePercent}%`);
     }
+    if (neutralEl) {
+      neutralEl.textContent = `${neutralPercent}%`;
+      console.log(`Set neutral percentage to: ${neutralPercent}%`);
+    }
+    if (negativeEl) {
+      negativeEl.textContent = `${negativePercent}%`;
+      console.log(`Set negative percentage to: ${negativePercent}%`);
+    }
+
+    console.log(`Sentiment percentages updated: ${positivePercent}% positive, ${neutralPercent}% neutral, ${negativePercent}% negative`);
+  }
   }
 
   function updateRecentTranscript(transcript) {
@@ -381,6 +440,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 300);
   };
 
+  // Utility function to format time
+  function formatTime(seconds) {
+    if (!seconds || seconds < 0) return '0:00';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+
   window.downloadTranscript = async function() {
     try {
       console.log('Downloading transcript for room:', room);
@@ -416,13 +490,14 @@ document.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(url);
 
         console.log('Transcript downloaded successfully');
+        alert('Transcript downloaded successfully!');
       } else {
         alert('No transcript data available to download. Please ensure there is conversation data in the meeting.');
         console.log('No transcript data available');
       }
     } catch (error) {
       console.error('Error downloading transcript:', error);
-      alert('Failed to download transcript. Please try again.');
+      alert(`Failed to download transcript: ${error.message}. Please try again.`);
     }
   };
 
@@ -430,10 +505,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('generateSummaryBtn').addEventListener('click', async function() {
     const button = this;
     const originalText = button.innerHTML;
-    
+
+    console.log('Generate summary button clicked for room:', room);
+
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
     button.disabled = true;
-    
+
     try {
       const response = await fetch('/summarize', {
         method: 'POST',
@@ -442,8 +519,10 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body: JSON.stringify({ room })
       });
-      
+
+      console.log('Summary response status:', response.status);
       const data = await response.json();
+      console.log('Summary response data:', data);
 
       if (response.ok && data.result) {
         // Format the result text for display
@@ -482,8 +561,10 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
         `;
+        console.log('Summary content updated successfully');
       } else {
         // Handle error response
+        console.error('Summary generation failed:', data);
         document.getElementById('summaryContent').innerHTML = `
           <div class="error-message">
             <i class="fas fa-exclamation-triangle"></i>
@@ -491,13 +572,13 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         `;
       }
-      
+
     } catch (error) {
       console.error('Error generating summary:', error);
       document.getElementById('summaryContent').innerHTML = `
         <div class="error-message">
           <i class="fas fa-exclamation-triangle"></i>
-          <p>Error generating summary. Please try again.</p>
+          <p>Network error: ${error.message}. Please check your connection and try again.</p>
         </div>
       `;
     } finally {

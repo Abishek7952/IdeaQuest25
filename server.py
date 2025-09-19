@@ -364,9 +364,92 @@ def nudge_participants():
                 nudged.append(sid)
         
         return jsonify({"nudged": nudged, "count": len(nudged)})
-        
+
     except Exception as e:
         log.error(f"Nudge error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/test-data/<room>', methods=['POST'])
+def add_test_data(room):
+    """Add test data for dashboard testing"""
+    try:
+        # Add test participants
+        test_participants = [
+            {"name": "Alice Johnson", "engagement": 0.85, "attention": 0.90, "speaking_time": 120},
+            {"name": "Bob Smith", "engagement": 0.72, "attention": 0.68, "speaking_time": 95},
+            {"name": "Carol Davis", "engagement": 0.91, "attention": 0.88, "speaking_time": 140},
+            {"name": "David Wilson", "engagement": 0.65, "attention": 0.70, "speaking_time": 80}
+        ]
+
+        # Add test transcript entries with sentiment
+        test_messages = [
+            {"text": "This is a great idea! I love the approach we're taking.", "sentiment": 0.8},
+            {"text": "I'm not sure about this part, can we discuss it more?", "sentiment": -0.1},
+            {"text": "Excellent work everyone! This looks fantastic.", "sentiment": 0.9},
+            {"text": "I disagree with this approach, it seems problematic.", "sentiment": -0.6},
+            {"text": "The results look good so far.", "sentiment": 0.4},
+            {"text": "I'm concerned about the timeline.", "sentiment": -0.3},
+            {"text": "Perfect! This is exactly what we needed.", "sentiment": 0.7},
+            {"text": "This is terrible and won't work.", "sentiment": -0.8},
+            {"text": "Good progress on this project.", "sentiment": 0.5},
+            {"text": "I'm happy with these results.", "sentiment": 0.6}
+        ]
+
+        # Initialize room data if not exists
+        if room not in room_data:
+            room_data[room] = {
+                "transcript": [],
+                "participants": {},
+                "engagement": {},
+                "sentiment_history": [],
+                "meeting_start": time.time(),
+                "network_stats": {},
+                "attention_scores": defaultdict(list)
+            }
+
+        # Add test participants
+        for i, participant in enumerate(test_participants):
+            sid = f"test_user_{i+1}"
+            room_data[room]["participants"][sid] = {
+                "name": participant["name"],
+                "engagement_score": participant["engagement"],
+                "speaking_time": participant["speaking_time"],
+                "last_activity": time.time()
+            }
+            # Add attention scores
+            room_data[room]["attention_scores"][sid] = [participant["attention"]] * 10
+
+        # Add test transcript and sentiment
+        for i, msg in enumerate(test_messages):
+            ts = int(time.time()) - (len(test_messages) - i) * 30  # Spread over last 5 minutes
+
+            # Add transcript entry
+            room_data[room]["transcript"].append({
+                "ts": ts,
+                "text": msg["text"],
+                "sid": f"test_user_{(i % len(test_participants)) + 1}",
+                "speaker": test_participants[i % len(test_participants)]["name"],
+                "sentiment": msg["sentiment"]
+            })
+
+            # Add sentiment entry
+            room_data[room]["sentiment_history"].append({
+                "timestamp": ts,
+                "score": msg["sentiment"],
+                "text": msg["text"][:100],
+                "speaker": f"test_user_{(i % len(test_participants)) + 1}"
+            })
+
+        return jsonify({
+            "message": "Test data added successfully",
+            "room": room,
+            "participants": len(test_participants),
+            "transcript_entries": len(test_messages),
+            "sentiment_entries": len(test_messages)
+        })
+
+    except Exception as e:
+        log.error(f"Test data error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # Socket.IO Events
