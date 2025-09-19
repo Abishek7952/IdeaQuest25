@@ -570,32 +570,39 @@ def analyze_simple_sentiment(text):
 
 if __name__ == '__main__':
     try:
+        # Render uses PORT environment variable
         PORT = int(os.environ.get("PORT", 5000))
         DEBUG = os.environ.get("FLASK_ENV") != "production"
+        HOST = '0.0.0.0'  # Required for Render deployment
 
-        print(f"Starting AgamAI Meeting Platform on port {PORT}")
-        print(f"Debug mode: {DEBUG}")
-        print(f"Features enabled:")
-        print(f"  - Transcription: {TRANSCRIPTION_ENABLED}")
-        print(f"  - Summarizer: {SUMMARIZER_ENABLED}")
-        print(f"  - Network Adaptation: {NETWORK_ADAPTATION_ENABLED}")
-        print(f"  - Engagement: {ENGAGEMENT_ENABLED}")
-        print(f"  - Sentiment: {SENTIMENT_ENABLED}")
+        print(f"🚀 Starting AgamAI Meeting Platform")
+        print(f"📡 Server: http://{HOST}:{PORT}")
+        print(f"🔧 Debug mode: {DEBUG}")
+        print(f"🌍 Environment: {'Production' if not DEBUG else 'Development'}")
+        print(f"🎯 Features enabled:")
+        print(f"   ✅ Transcription: {'Enabled' if TRANSCRIPTION_ENABLED else 'Disabled'}")
+        print(f"   ✅ AI Summarization: {'Enabled' if SUMMARIZER_ENABLED else 'Disabled'}")
+        print(f"   ✅ Network Adaptation: {'Enabled' if NETWORK_ADAPTATION_ENABLED else 'Disabled'}")
+        print(f"   ✅ Engagement Tracking: {'Enabled' if ENGAGEMENT_ENABLED else 'Disabled'}")
+        print(f"   ✅ Sentiment Analysis: {'Enabled' if SENTIMENT_ENABLED else 'Disabled'}")
 
-        log.info(f"Starting AgamAI Meeting Platform on port {PORT}")
+        log.info(f"Starting AgamAI Meeting Platform on {HOST}:{PORT}")
         log.info(f"Debug mode: {DEBUG}")
         log.info(f"Features enabled: Transcription={TRANSCRIPTION_ENABLED}, Summarizer={SUMMARIZER_ENABLED}, Network={NETWORK_ADAPTATION_ENABLED}, Engagement={ENGAGEMENT_ENABLED}, Sentiment={SENTIMENT_ENABLED}")
 
-        print("Starting SocketIO server...")
+        print("🌐 Starting SocketIO server...")
+        print("=" * 50)
+
         socketio.run(
             app,
-            host='0.0.0.0',
+            host=HOST,
             port=PORT,
             debug=DEBUG,
             use_reloader=False,
             allow_unsafe_werkzeug=True
         )
     except Exception as e:
-        print(f"Error starting server: {e}")
+        print(f"❌ Error starting server: {e}")
         import traceback
         traceback.print_exc()
+        exit(1)
