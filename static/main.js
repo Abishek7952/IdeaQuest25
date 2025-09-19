@@ -12,22 +12,21 @@ document.addEventListener('DOMContentLoaded', () => {
   let prevPacketsLost = 0;
 
   // ✅ STUN + TURN servers
-  const config = { 
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { 
-        urls: 'turn:relay.metered.ca:80',
-        username: 'openai',
-        credential: 'openai123'
-      },
-      { 
-        urls: 'turn:relay.metered.ca:443',
-        username: 'openai',
-        credential: 'openai123'
-      }
-    ]
-  };
-
+  const config = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    }
+  ]
+};
   // helpers
   function clog(...args) { console.log('[APP]', ...args); }
   function sLog(...args) { console.log('[SOCKET]', ...args); }
