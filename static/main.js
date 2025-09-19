@@ -1,4 +1,4 @@
-// static/main.js — robust, single-file replacement
+// static/main.js — robust, with TURN server (Metered.ca free relay)
 document.addEventListener('DOMContentLoaded', () => {
   // state
   let joined = false;
@@ -11,7 +11,22 @@ document.addEventListener('DOMContentLoaded', () => {
   let prevPacketsReceived = 0;
   let prevPacketsLost = 0;
 
-  const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  // ✅ STUN + TURN servers
+  const config = { 
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { 
+        urls: 'turn:relay.metered.ca:80',
+        username: 'openai',
+        credential: 'openai123'
+      },
+      { 
+        urls: 'turn:relay.metered.ca:443',
+        username: 'openai',
+        credential: 'openai123'
+      }
+    ]
+  };
 
   // helpers
   function clog(...args) { console.log('[APP]', ...args); }
