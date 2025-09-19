@@ -82,6 +82,10 @@ FLASK_ENV=production
 - ✅ Fixed: Heavy dependencies removed from requirements.txt
 - The app now uses lightweight alternatives
 
+**Eventlet Python 3.13 Compatibility Error:**
+- ✅ Fixed: Switched from eventlet to gevent for better Python compatibility
+- ✅ Fixed: Using Python 3.11.9 runtime for stability
+
 **Port Issues:**
 - ✅ Fixed: Server automatically uses Render's PORT environment variable
 

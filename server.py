@@ -1,15 +1,12 @@
 # server.py - Complete implementation with all features
-import eventlet
-eventlet.monkey_patch()
+# Adaptive async mode for local development and production deployment
 
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from collections import defaultdict
 import logging
-import threading
 import os
 import time
-import json
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
@@ -18,11 +15,27 @@ log = logging.getLogger("agamai-platform")
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'agamai-secret-key-2024')
 
+# Determine the best async mode based on available packages
+def get_async_mode():
+    """Determine the best async mode for the environment"""
+    try:
+        import gevent
+        return 'gevent'
+    except ImportError:
+        try:
+            import eventlet
+            return 'eventlet'
+        except ImportError:
+            return 'threading'
+
+ASYNC_MODE = get_async_mode()
+log.info(f"Using async mode: {ASYNC_MODE}")
+
 socketio = SocketIO(
-    app, 
-    cors_allowed_origins='*', 
-    async_mode='eventlet', 
-    logger=False, 
+    app,
+    cors_allowed_origins='*',
+    async_mode=ASYNC_MODE,
+    logger=False,
     engineio_logger=False,
     ping_timeout=60,
     ping_interval=25
