@@ -139,12 +139,24 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch(`/sentiment/${room}`);
       const data = await response.json();
-      
+
       if (data.sentiment_history && data.sentiment_history.length > 0) {
         updateSentimentChart(data.sentiment_history);
         updateSentimentStats(data);
+      } else {
+        // If no sentiment data, try to get it from the sentiment analysis module
+        try {
+          const sentimentResponse = await fetch(`/sentiment/${room}`);
+          const sentimentData = await sentimentResponse.json();
+          if (sentimentData.sentiment_history) {
+            updateSentimentChart(sentimentData.sentiment_history);
+            updateSentimentStats(sentimentData);
+          }
+        } catch (e) {
+          console.log('No sentiment data available yet');
+        }
       }
-      
+
     } catch (error) {
       console.error('Error loading sentiment data:', error);
     }
@@ -256,25 +268,61 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateSentimentStats(sentimentData) {
     const overall = sentimentData.overall_sentiment || 'neutral';
-    const stats = sentimentData.sentiment_stats || { positive: 0, neutral: 0, negative: 0 };
+    const history = sentimentData.sentiment_history || [];
+
+    // Calculate stats from sentiment history
+    let positive = 0, neutral = 0, negative = 0;
+
+    history.forEach(entry => {
+      const score = entry.score || 0;
+      if (score > 0.2) positive++;
+      else if (score < -0.2) negative++;
+      else neutral++;
+    });
+
+    const total = history.length;
 
     // Update overall sentiment
-    document.getElementById('overallSentiment').textContent = overall.charAt(0).toUpperCase() + overall.slice(1);
-    
+    const overallEl = document.getElementById('overallSentiment');
+    if (overallEl) {
+      overallEl.textContent = overall.charAt(0).toUpperCase() + overall.slice(1);
+    }
+
     // Update emoji
     const emojiMap = {
       positive: '😊',
       neutral: '😐',
       negative: '😔'
     };
-    document.getElementById('sentimentEmoji').textContent = emojiMap[overall] || '😐';
+    const emojiEl = document.getElementById('sentimentEmoji');
+    if (emojiEl) {
+      emojiEl.textContent = emojiMap[overall] || '😐';
+    }
 
     // Update percentages
-    const total = stats.positive + stats.neutral + stats.negative;
     if (total > 0) {
-      document.getElementById('positivePercent').textContent = Math.round(stats.positive / total * 100) + '%';
-      document.getElementById('neutralPercent').textContent = Math.round(stats.neutral / total * 100) + '%';
-      document.getElementById('negativePercent').textContent = Math.round(stats.negative / total * 100) + '%';
+      const positivePercent = Math.round((positive / total) * 100);
+      const neutralPercent = Math.round((neutral / total) * 100);
+      const negativePercent = Math.round((negative / total) * 100);
+
+      const positiveEl = document.getElementById('positivePercent');
+      const neutralEl = document.getElementById('neutralPercent');
+      const negativeEl = document.getElementById('negativePercent');
+
+      if (positiveEl) positiveEl.textContent = `${positivePercent}%`;
+      if (neutralEl) neutralEl.textContent = `${neutralPercent}%`;
+      if (negativeEl) negativeEl.textContent = `${negativePercent}%`;
+
+      console.log(`Sentiment percentages updated: ${positivePercent}% positive, ${neutralPercent}% neutral, ${negativePercent}% negative`);
+    } else {
+      // No data available
+      const positiveEl = document.getElementById('positivePercent');
+      const neutralEl = document.getElementById('neutralPercent');
+      const negativeEl = document.getElementById('negativePercent');
+
+      if (positiveEl) positiveEl.textContent = '0%';
+      if (neutralEl) neutralEl.textContent = '0%';
+      if (negativeEl) negativeEl.textContent = '0%';
     }
   }
 
@@ -335,15 +383,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.downloadTranscript = async function() {
     try {
+      console.log('Downloading transcript for room:', room);
       const response = await fetch(`/transcript/${room}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
-      
+      console.log('Transcript data received:', data);
+
       if (data.transcript && data.transcript.length > 0) {
-        const transcriptText = data.transcript.map(entry => 
-          `[${new Date(entry.ts * 1000).toLocaleTimeString()}] ${entry.speaker || 'Unknown'}: ${entry.text}`
-        ).join('\n');
-        
-        const blob = new Blob([transcriptText], { type: 'text/plain' });
+        const transcriptText = data.transcript.map(entry => {
+          const timestamp = entry.ts ? new Date(entry.ts * 1000).toLocaleTimeString() : 'Unknown time';
+          const speaker = entry.speaker || 'Unknown Speaker';
+          const text = entry.text || '';
+          return `[${timestamp}] ${speaker}: ${text}`;
+        }).join('\n');
+
+        // Add header to transcript
+        const header = `Meeting Transcript - Room: ${room}\nGenerated: ${new Date().toLocaleString()}\nTotal Entries: ${data.transcript.length}\n\n`;
+        const fullTranscript = header + transcriptText;
+
+        const blob = new Blob([fullTranscript], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -352,9 +414,15 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        console.log('Transcript downloaded successfully');
+      } else {
+        alert('No transcript data available to download. Please ensure there is conversation data in the meeting.');
+        console.log('No transcript data available');
       }
     } catch (error) {
       console.error('Error downloading transcript:', error);
+      alert('Failed to download transcript. Please try again.');
     }
   };
 
@@ -376,24 +444,50 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       
       const data = await response.json();
-      
-      if (data.result) {
+
+      if (response.ok && data.result) {
+        // Format the result text for display
+        const resultText = data.result;
+        const formattedResult = resultText.replace(/\n/g, '<br>');
+
         document.getElementById('summaryContent').innerHTML = `
           <div class="summary-result">
             <div class="summary-section">
-              <h4><i class="fas fa-file-text"></i> Meeting Summary</h4>
-              <p>${data.result.summary || 'No summary available'}</p>
+              <h4><i class="fas fa-file-text"></i> AI-Generated Meeting Summary</h4>
+              <div class="summary-text">${formattedResult}</div>
             </div>
+            ${data.stats ? `
             <div class="summary-section">
-              <h4><i class="fas fa-list-check"></i> Action Items</h4>
-              <ul>
-                ${(data.result.action_items || []).map(item => `<li>${item}</li>`).join('')}
-              </ul>
+              <h4><i class="fas fa-chart-bar"></i> Meeting Statistics</h4>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-label">Word Count:</span>
+                  <span class="stat-value">${data.stats.word_count || 0}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Duration:</span>
+                  <span class="stat-value">${data.stats.estimated_duration ? Math.round(data.stats.estimated_duration) + ' min' : 'N/A'}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Transcript Entries:</span>
+                  <span class="stat-value">${data.transcript_length || 0}</span>
+                </div>
+              </div>
             </div>
+            ` : ''}
             <div class="summary-section">
-              <h4><i class="fas fa-heart"></i> Overall Emotion</h4>
-              <p>${data.result.overall_emotion || 'Neutral'}</p>
+              <h4><i class="fas fa-info-circle"></i> Summary Details</h4>
+              <p><small>Generated on ${new Date(data.timestamp || Date.now()).toLocaleString()}</small></p>
+              <p><small>AI Backend: ${data.ai_backend || 'Unknown'}</small></p>
             </div>
+          </div>
+        `;
+      } else {
+        // Handle error response
+        document.getElementById('summaryContent').innerHTML = `
+          <div class="error-message">
+            <i class="fas fa-exclamation-triangle"></i>
+            <p>${data.error || 'Failed to generate summary. Please try again.'}</p>
           </div>
         `;
       }
