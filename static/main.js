@@ -435,73 +435,114 @@ document.addEventListener('DOMContentLoaded', () => {
   function createPeerConnectionFor(remoteSid) {
     const pc = new RTCPeerConnection(config);
     pcs[remoteSid] = pc;
-    
+
     // Add local stream tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
+        log(`Adding ${track.kind} track to peer connection for ${remoteSid}`);
         pc.addTrack(track, localStream);
       });
     }
-    
+
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        log(`Sending ICE candidate to ${remoteSid}`);
         socket.emit('ice-candidate', {
           to: remoteSid,
           candidate: event.candidate
         });
+      } else {
+        log(`ICE gathering complete for ${remoteSid}`);
       }
     };
-    
+
     // Handle remote stream
     pc.ontrack = (event) => {
-      log(`Received remote stream from ${remoteSid}`);
-      attachRemoteStream(remoteSid, event.streams[0]);
+      log(`Received ${event.track.kind} track from ${remoteSid}`);
+      if (event.streams && event.streams[0]) {
+        attachRemoteStream(remoteSid, event.streams[0]);
+      }
     };
-    
+
     // Handle connection state changes
     pc.onconnectionstatechange = () => {
       log(`Connection state with ${remoteSid}: ${pc.connectionState}`);
-      
+
       if (pc.connectionState === 'connected') {
+        log(`Successfully connected to ${remoteSid}`);
         startStatsCollection(remoteSid);
-      } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+      } else if (pc.connectionState === 'connecting') {
+        log(`Connecting to ${remoteSid}...`);
+      } else if (pc.connectionState === 'failed') {
+        log(`Connection failed with ${remoteSid}, attempting restart`);
+        // Attempt to restart the connection
+        setTimeout(() => {
+          if (pcs[remoteSid] && pcs[remoteSid].connectionState === 'failed') {
+            log(`Restarting connection with ${remoteSid}`);
+            removePeer(remoteSid);
+            createPeerAndOffer(remoteSid);
+          }
+        }, 2000);
+      } else if (['disconnected', 'closed'].includes(pc.connectionState)) {
+        log(`Disconnected from ${remoteSid}`);
         removePeer(remoteSid);
         removeParticipant(remoteSid);
       }
     };
-    
+
+    // Handle ICE connection state changes
+    pc.oniceconnectionstatechange = () => {
+      log(`ICE connection state with ${remoteSid}: ${pc.iceConnectionState}`);
+    };
+
+    // Handle signaling state changes
+    pc.onsignalingstatechange = () => {
+      log(`Signaling state with ${remoteSid}: ${pc.signalingState}`);
+    };
+
     return pc;
   }
   
   async function handleOffer(data) {
     try {
+      log(`Handling offer from ${data.from}`);
       const pc = createPeerConnectionFor(data.from);
+
+      log(`Setting remote description for ${data.from}`);
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      
+
+      log(`Creating answer for ${data.from}`);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      
+
+      log(`Sending answer to ${data.from}`);
       socket.emit('answer', {
         to: data.from,
         sdp: pc.localDescription
       });
-      
-      log(`Sent answer to ${data.from}`);
+
+      log(`Successfully sent answer to ${data.from}`);
     } catch (error) {
-      log('Error handling offer:', error);
+      log(`Error handling offer from ${data.from}:`, error);
+      showNotification(`Failed to connect to ${data.from}`, 'error');
     }
   }
   
   async function handleAnswer(data) {
     try {
+      log(`Handling answer from ${data.from}`);
       const pc = pcs[data.from];
       if (pc) {
+        log(`Setting remote description (answer) for ${data.from}`);
         await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        log(`Set remote description for ${data.from}`);
+        log(`Successfully set remote description for ${data.from}`);
+      } else {
+        log(`No peer connection found for ${data.from}`);
       }
     } catch (error) {
-      log('Error handling answer:', error);
+      log(`Error handling answer from ${data.from}:`, error);
+      showNotification(`Failed to complete connection to ${data.from}`, 'error');
     }
   }
   
@@ -518,17 +559,18 @@ document.addEventListener('DOMContentLoaded', () => {
   
   function attachRemoteStream(remoteSid, stream) {
     let videoElement = document.getElementById(`remote_${remoteSid}`);
-    
+
     if (!videoElement) {
       const wrapper = document.createElement('div');
       wrapper.id = `wrap_${remoteSid}`;
       wrapper.className = 'video-tile';
-      
+
       videoElement = document.createElement('video');
       videoElement.id = `remote_${remoteSid}`;
       videoElement.autoplay = true;
       videoElement.playsInline = true;
-      
+      videoElement.muted = false; // Allow audio for transcription
+
       const overlay = document.createElement('div');
       overlay.className = 'tile-overlay';
       overlay.innerHTML = `
@@ -543,16 +585,131 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       `;
-      
+
       wrapper.appendChild(videoElement);
       wrapper.appendChild(overlay);
       remotesGrid.appendChild(wrapper);
     }
-    
+
     videoElement.srcObject = stream;
+
+    // Set up audio capture for transcription
+    setupRemoteAudioCapture(remoteSid, stream);
+
+    log(`Attached remote stream for ${remoteSid}`);
+  }
+
+  // Remote audio capture for server-side transcription
+  const remoteAudioContexts = {};
+  const remoteAudioProcessors = {};
+
+  function setupRemoteAudioCapture(remoteSid, stream) {
+    try {
+      // Only capture audio tracks
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        log(`No audio tracks found for ${remoteSid}`);
+        return;
+      }
+
+      // Create audio context for this remote participant
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      remoteAudioContexts[remoteSid] = audioContext;
+      remoteAudioProcessors[remoteSid] = processor;
+
+      let audioBuffer = [];
+      let lastSend = Date.now();
+      const SEND_INTERVAL = 3000; // Send audio chunks every 3 seconds
+
+      processor.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+
+        // Convert to 16-bit PCM
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+
+        audioBuffer.push(pcmData);
+
+        // Send accumulated audio data periodically
+        const now = Date.now();
+        if (now - lastSend >= SEND_INTERVAL && audioBuffer.length > 0) {
+          sendAudioChunkToServer(remoteSid, audioBuffer);
+          audioBuffer = [];
+          lastSend = now;
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      log(`Set up audio capture for remote participant ${remoteSid}`);
+
+    } catch (error) {
+      log(`Error setting up audio capture for ${remoteSid}:`, error);
+    }
+  }
+
+  function sendAudioChunkToServer(remoteSid, audioBuffer) {
+    try {
+      // Combine all audio chunks
+      const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+      const combinedAudio = new Int16Array(totalLength);
+
+      let offset = 0;
+      for (const chunk of audioBuffer) {
+        combinedAudio.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      // Convert to base64
+      const audioBytes = new Uint8Array(combinedAudio.buffer);
+      const base64Audio = btoa(String.fromCharCode.apply(null, audioBytes));
+
+      // Send to server for transcription
+      socket.emit('audio-chunk', {
+        room,
+        audio: base64Audio,
+        ts: Math.floor(Date.now() / 1000),
+        seq: Date.now(),
+        from: remoteSid
+      });
+
+      log(`Sent audio chunk for ${remoteSid} (${combinedAudio.length} samples)`);
+
+    } catch (error) {
+      log(`Error sending audio chunk for ${remoteSid}:`, error);
+    }
+  }
+
+  function cleanupRemoteAudioCapture(remoteSid) {
+    if (remoteAudioContexts[remoteSid]) {
+      try {
+        remoteAudioContexts[remoteSid].close();
+        delete remoteAudioContexts[remoteSid];
+      } catch (error) {
+        log(`Error closing audio context for ${remoteSid}:`, error);
+      }
+    }
+
+    if (remoteAudioProcessors[remoteSid]) {
+      try {
+        remoteAudioProcessors[remoteSid].disconnect();
+        delete remoteAudioProcessors[remoteSid];
+      } catch (error) {
+        log(`Error disconnecting audio processor for ${remoteSid}:`, error);
+      }
+    }
   }
   
   function removePeer(remoteSid) {
+    // Clean up audio capture first
+    cleanupRemoteAudioCapture(remoteSid);
+
     if (pcs[remoteSid]) {
       try {
         pcs[remoteSid].close();
@@ -561,11 +718,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       delete pcs[remoteSid];
     }
-    
+
     const wrapper = document.getElementById(`wrap_${remoteSid}`);
     if (wrapper) {
       wrapper.remove();
     }
+
+    log(`Removed peer ${remoteSid}`);
   }
   
   // Enhanced Speech Recognition with interim results

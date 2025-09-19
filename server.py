@@ -435,19 +435,46 @@ def on_leave(data):
 def handle_offer(data):
     target = data.get('to')
     sdp = data.get('sdp')
-    emit('offer', {'sdp': sdp, 'from': request.sid}, room=target)
+    log.info(f"Forwarding offer from {request.sid} to {target}")
+    emit('offer', {'sdp': sdp, 'from': request.sid}, to=target)
 
 @socketio.on('answer')
 def handle_answer(data):
     target = data.get('to')
     sdp = data.get('sdp')
-    emit('answer', {'sdp': sdp, 'from': request.sid}, room=target)
+    log.info(f"Forwarding answer from {request.sid} to {target}")
+    emit('answer', {'sdp': sdp, 'from': request.sid}, to=target)
 
 @socketio.on('ice-candidate')
 def handle_ice(data):
     target = data.get('to')
     candidate = data.get('candidate')
-    emit('ice-candidate', {'candidate': candidate, 'from': request.sid}, room=target)
+    log.info(f"Forwarding ICE candidate from {request.sid} to {target}")
+    emit('ice-candidate', {'candidate': candidate, 'from': request.sid}, to=target)
+
+@socketio.on('audio-chunk')
+def handle_audio_chunk(data):
+    """Handle audio chunks for server-side transcription"""
+    room = data.get('room', 'default')
+    audio_data = data.get('audio')
+    ts = data.get('ts', time.time())
+    seq = data.get('seq', 0)
+    from_sid = data.get('from', request.sid)  # Speaker ID
+
+    if not audio_data:
+        return
+
+    try:
+        # Import transcription module if available
+        if TRANSCRIPTION_ENABLED:
+            from transcription import handle_audio_chunk, start_transcription_worker
+            handle_audio_chunk(room, audio_data, ts, seq, from_sid)
+            start_transcription_worker(room, socketio)
+            log.info(f"Processing audio chunk from {from_sid} in room {room}")
+        else:
+            log.warning("Transcription not enabled, ignoring audio chunk")
+    except Exception as e:
+        log.error(f"Error handling audio chunk: {e}")
 
 @socketio.on('transcript-text')
 def handle_transcript_text(data):
