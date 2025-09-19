@@ -254,6 +254,19 @@ document.addEventListener('DOMContentLoaded', () => {
       updateSentimentChart();
     }
   });
+
+  // Handle remote participant speech recognition
+  socket.on('remote-speech', (data) => {
+    log('Remote speech from:', data.from, data.text.substring(0, 50));
+    const entry = {
+      ts: data.ts,
+      text: data.text,
+      sid: data.from,
+      speaker: `User ${data.from.slice(0, 8)}`,
+      sentiment: 0 // Default neutral sentiment
+    };
+    appendTranscript(entry);
+  });
   
   socket.on('attention-update', (data) => {
     log(`Attention from ${data.sid}: ${Math.round(data.score * 100)}%`);
@@ -433,6 +446,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   function createPeerConnectionFor(remoteSid) {
+    // Close existing connection if it exists
+    if (pcs[remoteSid]) {
+      log(`Closing existing peer connection for ${remoteSid}`);
+      try {
+        pcs[remoteSid].close();
+      } catch (e) {
+        log(`Error closing existing connection: ${e}`);
+      }
+      delete pcs[remoteSid];
+    }
+
     const pc = new RTCPeerConnection(config);
     pcs[remoteSid] = pc;
 
@@ -475,15 +499,8 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (pc.connectionState === 'connecting') {
         log(`Connecting to ${remoteSid}...`);
       } else if (pc.connectionState === 'failed') {
-        log(`Connection failed with ${remoteSid}, attempting restart`);
-        // Attempt to restart the connection
-        setTimeout(() => {
-          if (pcs[remoteSid] && pcs[remoteSid].connectionState === 'failed') {
-            log(`Restarting connection with ${remoteSid}`);
-            removePeer(remoteSid);
-            createPeerAndOffer(remoteSid);
-          }
-        }, 2000);
+        log(`Connection failed with ${remoteSid}`);
+        // Don't auto-restart to avoid loops
       } else if (['disconnected', 'closed'].includes(pc.connectionState)) {
         log(`Disconnected from ${remoteSid}`);
         removePeer(remoteSid);
@@ -494,6 +511,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle ICE connection state changes
     pc.oniceconnectionstatechange = () => {
       log(`ICE connection state with ${remoteSid}: ${pc.iceConnectionState}`);
+
+      if (pc.iceConnectionState === 'connected') {
+        log(`ICE connected with ${remoteSid}`);
+      } else if (pc.iceConnectionState === 'failed') {
+        log(`ICE connection failed with ${remoteSid}`);
+      }
     };
 
     // Handle signaling state changes
@@ -534,9 +557,14 @@ document.addEventListener('DOMContentLoaded', () => {
       log(`Handling answer from ${data.from}`);
       const pc = pcs[data.from];
       if (pc) {
-        log(`Setting remote description (answer) for ${data.from}`);
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        log(`Successfully set remote description for ${data.from}`);
+        // Check if we're in the correct state to set remote description
+        if (pc.signalingState === 'have-local-offer') {
+          log(`Setting remote description (answer) for ${data.from}`);
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          log(`Successfully set remote description for ${data.from}`);
+        } else {
+          log(`Ignoring answer from ${data.from} - wrong signaling state: ${pc.signalingState}`);
+        }
       } else {
         log(`No peer connection found for ${data.from}`);
       }
@@ -589,12 +617,18 @@ document.addEventListener('DOMContentLoaded', () => {
       wrapper.appendChild(videoElement);
       wrapper.appendChild(overlay);
       remotesGrid.appendChild(wrapper);
+
+      log(`Created video element for ${remoteSid}`);
     }
 
-    videoElement.srcObject = stream;
+    // Only set stream if it's different
+    if (videoElement.srcObject !== stream) {
+      videoElement.srcObject = stream;
+      log(`Set video stream for ${remoteSid}`);
 
-    // Set up audio capture for transcription
-    setupRemoteAudioCapture(remoteSid, stream);
+      // Set up audio capture for transcription (only once)
+      setupRemoteAudioCapture(remoteSid, stream);
+    }
 
     log(`Attached remote stream for ${remoteSid}`);
   }
@@ -605,6 +639,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function setupRemoteAudioCapture(remoteSid, stream) {
     try {
+      // Skip if already set up
+      if (remoteAudioContexts[remoteSid]) {
+        log(`Audio capture already set up for ${remoteSid}`);
+        return;
+      }
+
       // Only capture audio tracks
       const audioTracks = stream.getAudioTracks();
       if (audioTracks.length === 0) {
@@ -612,6 +652,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // Disable remote audio capture for now to fix the stack overflow issue
+      // This will be re-enabled once the server-side transcription is properly configured
+      log(`Skipping audio capture for ${remoteSid} - server-side transcription disabled`);
+      return;
+
+      // TODO: Re-enable when server-side transcription is properly configured
+      /*
       // Create audio context for this remote participant
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const source = audioContext.createMediaStreamSource(stream);
@@ -622,23 +669,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let audioBuffer = [];
       let lastSend = Date.now();
-      const SEND_INTERVAL = 3000; // Send audio chunks every 3 seconds
+      const SEND_INTERVAL = 5000; // Send audio chunks every 5 seconds
 
       processor.onaudioprocess = (event) => {
         const inputData = event.inputBuffer.getChannelData(0);
 
-        // Convert to 16-bit PCM
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        // Only process if there's significant audio
+        const volume = Math.sqrt(inputData.reduce((sum, val) => sum + val * val, 0) / inputData.length);
+        if (volume < 0.01) return; // Skip silent audio
+
+        // Convert to 16-bit PCM with reduced precision
+        const pcmData = new Int16Array(Math.floor(inputData.length / 4)); // Downsample
+        for (let i = 0; i < pcmData.length; i++) {
+          const sampleIndex = i * 4;
+          pcmData[i] = Math.max(-32768, Math.min(32767, inputData[sampleIndex] * 32768));
         }
 
         audioBuffer.push(pcmData);
 
+        // Limit buffer size
+        if (audioBuffer.length > 10) {
+          audioBuffer = audioBuffer.slice(-5); // Keep only last 5 chunks
+        }
+
         // Send accumulated audio data periodically
         const now = Date.now();
         if (now - lastSend >= SEND_INTERVAL && audioBuffer.length > 0) {
-          sendAudioChunkToServer(remoteSid, audioBuffer);
+          sendAudioChunkToServer(remoteSid, audioBuffer.slice()); // Copy array
           audioBuffer = [];
           lastSend = now;
         }
@@ -648,6 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
       processor.connect(audioContext.destination);
 
       log(`Set up audio capture for remote participant ${remoteSid}`);
+      */
 
     } catch (error) {
       log(`Error setting up audio capture for ${remoteSid}:`, error);
@@ -656,19 +714,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function sendAudioChunkToServer(remoteSid, audioBuffer) {
     try {
-      // Combine all audio chunks
-      const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+      // Limit buffer size to prevent stack overflow
+      if (audioBuffer.length === 0) return;
+
+      // Combine all audio chunks with size limit
+      const maxChunks = Math.min(audioBuffer.length, 10); // Limit to 10 chunks max
+      const chunksToProcess = audioBuffer.slice(0, maxChunks);
+
+      const totalLength = chunksToProcess.reduce((sum, chunk) => sum + chunk.length, 0);
+      if (totalLength === 0) return;
+
       const combinedAudio = new Int16Array(totalLength);
 
       let offset = 0;
-      for (const chunk of audioBuffer) {
-        combinedAudio.set(chunk, offset);
-        offset += chunk.length;
+      for (const chunk of chunksToProcess) {
+        if (offset + chunk.length <= totalLength) {
+          combinedAudio.set(chunk, offset);
+          offset += chunk.length;
+        }
       }
 
-      // Convert to base64
-      const audioBytes = new Uint8Array(combinedAudio.buffer);
-      const base64Audio = btoa(String.fromCharCode.apply(null, audioBytes));
+      // Convert to base64 in smaller chunks to avoid stack overflow
+      const chunkSize = 8192; // Process in 8KB chunks
+      let base64Audio = '';
+
+      for (let i = 0; i < combinedAudio.length; i += chunkSize) {
+        const end = Math.min(i + chunkSize, combinedAudio.length);
+        const slice = combinedAudio.slice(i, end);
+        const audioBytes = new Uint8Array(slice.buffer);
+
+        // Convert to base64 without using apply to avoid stack overflow
+        let binaryString = '';
+        for (let j = 0; j < audioBytes.length; j++) {
+          binaryString += String.fromCharCode(audioBytes[j]);
+        }
+        base64Audio += btoa(binaryString);
+      }
 
       // Send to server for transcription
       socket.emit('audio-chunk', {
@@ -871,6 +952,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         socket.emit('transcript-text', payload);
         log(`Final transcript: ${text}`);
+
+        // Also broadcast as remote speech for other participants
+        socket.emit('remote-speech', {
+          room,
+          text,
+          ts: Math.floor(Date.now() / 1000),
+          from: socket.id
+        });
 
         // Add visual feedback for successful recognition
         showNotification(`Recognized: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`, 'info', 3000);

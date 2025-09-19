@@ -547,6 +547,27 @@ def handle_transcript_text(data):
             "message": f"Auto-summary available ({transcript_length} transcript entries)"
         }, room=room)
 
+@socketio.on('remote-speech')
+def handle_remote_speech(data):
+    """Handle speech recognition results from participants"""
+    room = data.get('room', 'default')
+    text = data.get('text', '').strip()
+    ts = int(data.get('ts') or time.time())
+    from_sid = data.get('from', request.sid)
+
+    if not text:
+        return
+
+    log.info(f"Remote speech from {from_sid} in {room}: {text[:50]}...")
+
+    # Broadcast to other participants (exclude sender)
+    emit('remote-speech', {
+        "room": room,
+        "text": text,
+        "ts": ts,
+        "from": from_sid
+    }, room=room, include_self=False)
+
 @socketio.on('attention')
 def handle_attention(data):
     room = data.get('room', 'default')

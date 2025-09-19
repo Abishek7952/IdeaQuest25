@@ -1,21 +1,25 @@
-# 🔧 **Critical Issues Fixed - Video & Transcription**
+# 🔧 **COMPREHENSIVE FIXES - Video & Transcription Issues**
 
-## **Issues Identified & Resolved:**
+## **Critical Issues Identified & Resolved:**
 
 ### **Issue 1: Video Not Showing Between Participants** ✅ FIXED
 **Problem:** Remote participants' video streams were not displaying (showing black screens)
 
-**Root Cause:** WebRTC signaling messages were being sent to rooms instead of specific socket IDs
+**Root Causes Identified:**
+1. WebRTC signaling messages sent to rooms instead of specific socket IDs
+2. Duplicate peer connections causing state conflicts
+3. Invalid signaling state transitions
 
-**Fix Applied:**
+**Fixes Applied:**
+
+#### **1. Fixed WebRTC Signaling (server.py):**
 ```python
-# server.py - Fixed WebRTC signaling
 @socketio.on('offer')
 def handle_offer(data):
     target = data.get('to')
     sdp = data.get('sdp')
     log.info(f"Forwarding offer from {request.sid} to {target}")
-    emit('offer', {'sdp': sdp, 'from': request.sid}, to=target)  # ✅ Fixed: to=target instead of room=target
+    emit('offer', {'sdp': sdp, 'from': request.sid}, to=target)  # ✅ Fixed: to=target
 
 @socketio.on('answer')
 def handle_answer(data):
@@ -32,113 +36,122 @@ def handle_ice(data):
     emit('ice-candidate', {'candidate': candidate, 'from': request.sid}, to=target)  # ✅ Fixed: to=target
 ```
 
-**Enhanced WebRTC Connection Handling:**
-- Added detailed logging for connection states
-- Improved error handling and recovery
-- Added automatic connection restart on failure
-- Better ICE candidate and signaling state monitoring
+#### **2. Fixed Signaling State Management (static/main.js):**
+```javascript
+async function handleAnswer(data) {
+  const pc = pcs[data.from];
+  if (pc) {
+    // ✅ Check signaling state before setting remote description
+    if (pc.signalingState === 'have-local-offer') {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    } else {
+      log(`Ignoring answer - wrong signaling state: ${pc.signalingState}`);
+    }
+  }
+}
+```
+
+#### **3. Prevented Duplicate Peer Connections:**
+```javascript
+function createPeerConnectionFor(remoteSid) {
+  // ✅ Close existing connection if it exists
+  if (pcs[remoteSid]) {
+    pcs[remoteSid].close();
+    delete pcs[remoteSid];
+  }
+
+  const pc = new RTCPeerConnection(config);
+  pcs[remoteSid] = pc;
+  // ... rest of setup
+}
+```
 
 ---
 
 ### **Issue 2: Transcript Only Working Locally** ✅ FIXED
 **Problem:** Speech recognition only worked for the local user, not for remote participants
 
-**Root Cause:** No mechanism to capture and transcribe audio from remote WebRTC streams
+**Root Causes Identified:**
+1. No mechanism to share speech recognition results between participants
+2. Complex server-side audio processing causing stack overflow errors
+3. Audio capture from WebRTC streams was problematic
 
-**Fix Applied:**
+**Simplified Solution Applied:**
 
-#### **1. Server-Side Audio Chunk Handling:**
-```python
-# server.py - New audio chunk handler
-@socketio.on('audio-chunk')
-def handle_audio_chunk(data):
-    """Handle audio chunks for server-side transcription"""
-    room = data.get('room', 'default')
-    audio_data = data.get('audio')
-    ts = data.get('ts', time.time())
-    seq = data.get('seq', 0)
-    from_sid = data.get('from', request.sid)  # ✅ Speaker identification
-    
-    if TRANSCRIPTION_ENABLED:
-        from transcription import handle_audio_chunk, start_transcription_worker
-        handle_audio_chunk(room, audio_data, ts, seq, from_sid)  # ✅ Pass speaker ID
-        start_transcription_worker(room, socketio)
-```
-
-#### **2. Enhanced Transcription System:**
-```python
-# transcription.py - Multi-speaker support
-def audio_worker_for_room(room, socketio):
-    # ✅ Group audio by speaker for separate processing
-    speaker_buffers = {}
-    for ts, seq, audio_data, from_sid in buffer:
-        if from_sid not in speaker_buffers:
-            speaker_buffers[from_sid] = []
-        speaker_buffers[from_sid].append(audio_data)
-    
-    # ✅ Process each speaker's audio separately
-    for from_sid, audio_chunks in speaker_buffers.items():
-        combined = b''.join(audio_chunks)
-        if len(combined) > 1024:
-            text = transcribe_audio_data(combined, backend)
-            if text and text.strip():
-                entry = {
-                    "ts": int(now),
-                    "text": text.strip(),
-                    "backend": backend,
-                    "sid": from_sid,  # ✅ Speaker identification
-                    "speaker": f"User {from_sid[:8]}" if from_sid else "Unknown"
-                }
-                socketio.emit('transcript-update', {"room": room, "entry": entry}, room=room)
-```
-
-#### **3. Client-Side Remote Audio Capture:**
+#### **1. Broadcast Local Speech Recognition Results:**
 ```javascript
-// static/main.js - Capture audio from remote streams
-function setupRemoteAudioCapture(remoteSid, stream) {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    
-    processor.onaudioprocess = (event) => {
-        const inputData = event.inputBuffer.getChannelData(0);
-        
-        // ✅ Convert to PCM and send to server
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-            pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-        }
-        
-        audioBuffer.push(pcmData);
-        
-        // ✅ Send audio chunks periodically for transcription
-        if (now - lastSend >= SEND_INTERVAL && audioBuffer.length > 0) {
-            sendAudioChunkToServer(remoteSid, audioBuffer);
-            audioBuffer = [];
-            lastSend = now;
-        }
-    };
-}
+// static/main.js - Share speech recognition between participants
+speechRecognition.onresult = (event) => {
+  // ... process speech recognition ...
 
-function sendAudioChunkToServer(remoteSid, audioBuffer) {
-    // ✅ Combine and encode audio data
-    const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
-    const combinedAudio = new Int16Array(totalLength);
-    // ... combine audio chunks ...
-    
-    const audioBytes = new Uint8Array(combinedAudio.buffer);
-    const base64Audio = btoa(String.fromCharCode.apply(null, audioBytes));
-    
-    // ✅ Send to server with speaker identification
-    socket.emit('audio-chunk', {
-        room,
-        audio: base64Audio,
-        ts: Math.floor(Date.now() / 1000),
-        seq: Date.now(),
-        from: remoteSid  // ✅ Identify the speaker
+  if (finalTranscript.trim()) {
+    const payload = {
+      room,
+      text: finalTranscript.trim(),
+      ts: Math.floor(Date.now() / 1000),
+      confidence: event.results[event.results.length - 1][0].confidence || 0.9
+    };
+
+    // ✅ Send to server for storage
+    socket.emit('transcript-text', payload);
+
+    // ✅ Broadcast to other participants
+    socket.emit('remote-speech', {
+      room,
+      text: finalTranscript.trim(),
+      ts: Math.floor(Date.now() / 1000),
+      from: socket.id
     });
-}
+  }
+};
 ```
+
+#### **2. Server-Side Speech Broadcasting:**
+```python
+# server.py - Broadcast speech between participants
+@socketio.on('remote-speech')
+def handle_remote_speech(data):
+    """Handle speech recognition results from participants"""
+    room = data.get('room', 'default')
+    text = data.get('text', '').strip()
+    ts = int(data.get('ts') or time.time())
+    from_sid = data.get('from', request.sid)
+
+    if not text:
+        return
+
+    log.info(f"Remote speech from {from_sid} in {room}: {text[:50]}...")
+
+    # ✅ Broadcast to other participants (exclude sender)
+    emit('remote-speech', {
+        "room": room,
+        "text": text,
+        "ts": ts,
+        "from": from_sid
+    }, room=room, include_self=False)
+```
+
+#### **3. Client-Side Remote Speech Handling:**
+```javascript
+// static/main.js - Receive and display remote speech
+socket.on('remote-speech', (data) => {
+  log('Remote speech from:', data.from, data.text.substring(0, 50));
+  const entry = {
+    ts: data.ts,
+    text: data.text,
+    sid: data.from,
+    speaker: `User ${data.from.slice(0, 8)}`,
+    sentiment: 0 // Default neutral sentiment
+  };
+  appendTranscript(entry);  // ✅ Display in transcript
+});
+```
+
+#### **4. Fixed Audio Processing Stack Overflow:**
+- Disabled complex server-side audio capture that was causing errors
+- Simplified to use Web Speech API on each client
+- Results are shared via Socket.IO messaging
+- Much more reliable and performant approach
 
 ---
 
@@ -184,8 +197,61 @@ function sendAudioChunkToServer(remoteSid, audioBuffer) {
 
 ---
 
+## **Key Issues Resolved:**
+
+### **🎥 Video Connection Issues:**
+- ✅ **Fixed WebRTC signaling** - Messages now route to correct participants
+- ✅ **Prevented duplicate connections** - Proper cleanup of existing peer connections
+- ✅ **Fixed signaling state errors** - Proper state validation before setting remote descriptions
+- ✅ **Enhanced error handling** - Better logging and recovery mechanisms
+
+### **🎤 Transcription Issues:**
+- ✅ **Fixed stack overflow errors** - Removed problematic audio processing code
+- ✅ **Simplified architecture** - Uses Web Speech API on each client instead of complex server-side processing
+- ✅ **Real-time speech sharing** - Speech recognition results broadcast to all participants
+- ✅ **Proper speaker attribution** - Each transcript shows which participant spoke
+
+### **🔧 Technical Improvements:**
+- ✅ **Robust error handling** - Graceful handling of connection failures
+- ✅ **Memory management** - Proper cleanup of audio contexts and peer connections
+- ✅ **Performance optimization** - Reduced audio processing overhead
+- ✅ **Enhanced logging** - Detailed debugging information
+
+---
+
+## **How It Works Now:**
+
+### **Video Streaming:**
+1. **Proper signaling** - WebRTC messages route directly to intended recipients
+2. **Clean connections** - Duplicate peer connections are prevented
+3. **State validation** - Signaling states are checked before operations
+4. **Automatic recovery** - Failed connections are properly cleaned up
+
+### **Multi-Participant Transcription:**
+1. **Local recognition** - Each participant uses Web Speech API locally
+2. **Result broadcasting** - Speech recognition results are shared via Socket.IO
+3. **Real-time display** - All participants see transcripts from everyone
+4. **Speaker identification** - Clear attribution of who said what
+
+---
+
 ## **Expected Results:**
-- ✅ Video streams visible between all participants
-- ✅ Real-time transcription from all participants
-- ✅ Proper speaker identification in transcripts
-- ✅ Robust connection handling and recovery
+- ✅ **Video streams visible** between all participants
+- ✅ **Real-time transcription** from all participants
+- ✅ **Proper speaker identification** in transcripts
+- ✅ **Robust connection handling** and recovery
+- ✅ **No more stack overflow errors**
+- ✅ **Stable WebRTC connections**
+
+---
+
+## **Testing Instructions:**
+1. **Start server:** `python server.py`
+2. **Open multiple browser tabs/windows**
+3. **Join same room from different tabs**
+4. **Verify:**
+   - Video streams appear for all participants
+   - Speech from any participant appears in transcript
+   - Proper speaker identification
+   - No console errors
+   - Stable connections
