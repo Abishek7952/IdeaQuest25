@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const summarizeBtn = document.getElementById('summarizeBtn');
   const leaderboard = document.getElementById('leaderboard');
   const notifications = document.getElementById('notifications');
+  const speechStatus = document.getElementById('speechStatus');
   
   // Stats elements
   const rttEl = document.getElementById('rtt');
@@ -66,6 +67,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeTabs();
   initializeCharts();
   initializeQuickActions();
+
+  // Initialize speech status
+  updateSpeechStatus('inactive', 'Speech recognition inactive');
   
   function log(...args) {
     console.log('[AgamAI]', ...args);
@@ -346,6 +350,17 @@ document.addEventListener('DOMContentLoaded', () => {
       speechRecognition.stop();
       speechRecognition = null;
     }
+
+    // Clear recognition restart timeout
+    if (recognitionRestartTimeout) {
+      clearTimeout(recognitionRestartTimeout);
+      recognitionRestartTimeout = null;
+    }
+
+    // Hide interim transcript
+    if (interimTranscriptElement) {
+      interimTranscriptElement.style.display = 'none';
+    }
     
     if (attentionInterval) {
       clearInterval(attentionInterval);
@@ -553,62 +568,236 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // Speech Recognition
+  // Enhanced Speech Recognition with interim results
+  let interimTranscriptElement = null;
+  let recognitionRestartTimeout = null;
+
+  // Update speech recognition status indicator
+  function updateSpeechStatus(status, message) {
+    if (!speechStatus) return;
+
+    const icon = speechStatus.querySelector('i');
+    const text = speechStatus.querySelector('span');
+
+    // Remove all status classes
+    speechStatus.classList.remove('active', 'error');
+
+    switch (status) {
+      case 'active':
+        speechStatus.classList.add('active');
+        icon.className = 'fas fa-microphone';
+        text.textContent = message || 'Speech recognition active';
+        break;
+      case 'inactive':
+        icon.className = 'fas fa-microphone-slash';
+        text.textContent = message || 'Speech recognition inactive';
+        break;
+      case 'error':
+        speechStatus.classList.add('error');
+        icon.className = 'fas fa-exclamation-triangle';
+        text.textContent = message || 'Speech recognition error';
+        break;
+      case 'listening':
+        speechStatus.classList.add('active');
+        icon.className = 'fas fa-microphone';
+        text.textContent = message || 'Listening...';
+        break;
+    }
+  }
+
   function startSpeechRecognition() {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      log('Speech recognition not supported');
+      log('Speech recognition not supported in this browser');
+      showNotification('Speech recognition not supported in this browser', 'error');
       return;
     }
-    
+
+    // Clear any existing recognition
+    if (speechRecognition) {
+      speechRecognition.stop();
+      speechRecognition = null;
+    }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     speechRecognition = new SpeechRecognition();
-    
+
+    // Enhanced configuration
     speechRecognition.continuous = true;
     speechRecognition.interimResults = true;
     speechRecognition.lang = 'en-US';
-    
+    speechRecognition.maxAlternatives = 1;
+
+    // Create interim transcript display element if it doesn't exist
+    if (!interimTranscriptElement) {
+      interimTranscriptElement = document.createElement('div');
+      interimTranscriptElement.className = 'interim-transcript';
+      interimTranscriptElement.style.cssText = `
+        background: rgba(99, 102, 241, 0.1);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        border-radius: 8px;
+        padding: 12px;
+        margin: 8px 0;
+        font-style: italic;
+        color: #818cf8;
+        display: none;
+        animation: pulse 1.5s infinite;
+      `;
+      transcriptBox.appendChild(interimTranscriptElement);
+    }
+
+    speechRecognition.onstart = () => {
+      log('Speech recognition started successfully');
+      showNotification('Live transcription active', 'success', 2000);
+
+      // Update UI to show active state
+      if (toggleTranscriptBtn) {
+        toggleTranscriptBtn.classList.add('active');
+        toggleTranscriptBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+      }
+
+      // Update status indicator
+      updateSpeechStatus('listening', 'Listening for speech...');
+    };
+
     speechRecognition.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      // Process all results
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
+        const transcript = result[0].transcript;
+
         if (result.isFinal) {
-          const text = result[0].transcript.trim();
-          if (text) {
-            const payload = {
-              room,
-              text,
-              ts: Math.floor(Date.now() / 1000)
-            };
-            
-            socket.emit('transcript-text', payload);
-            log(`Transcript: ${text}`);
-          }
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
         }
       }
-    };
-    
-    speechRecognition.onerror = (event) => {
-      log('Speech recognition error:', event.error);
-      if (event.error === 'not-allowed') {
-        showNotification('Microphone access denied for speech recognition', 'error');
+
+      // Display interim results
+      if (interimTranscript.trim()) {
+        interimTranscriptElement.innerHTML = `
+          <div class="interim-header">
+            <i class="fas fa-microphone"></i> Speaking...
+          </div>
+          <div class="interim-text">${interimTranscript}</div>
+        `;
+        interimTranscriptElement.style.display = 'block';
+        transcriptBox.scrollTop = transcriptBox.scrollHeight;
+
+        // Update status to show active speaking
+        updateSpeechStatus('active', 'Speaking detected...');
+      } else {
+        interimTranscriptElement.style.display = 'none';
+
+        // Return to listening state
+        updateSpeechStatus('listening', 'Listening for speech...');
+      }
+
+      // Process final results
+      if (finalTranscript.trim()) {
+        const text = finalTranscript.trim();
+
+        // Hide interim display
+        interimTranscriptElement.style.display = 'none';
+
+        // Send to server
+        const payload = {
+          room,
+          text,
+          ts: Math.floor(Date.now() / 1000),
+          confidence: event.results[event.results.length - 1][0].confidence || 0.9
+        };
+
+        socket.emit('transcript-text', payload);
+        log(`Final transcript: ${text}`);
+
+        // Add visual feedback for successful recognition
+        showNotification(`Recognized: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`, 'info', 3000);
       }
     };
-    
+
+    speechRecognition.onerror = (event) => {
+      log('Speech recognition error:', event.error);
+      isRecognitionActive = false;
+
+      // Hide interim display on error
+      if (interimTranscriptElement) {
+        interimTranscriptElement.style.display = 'none';
+      }
+
+      switch (event.error) {
+        case 'not-allowed':
+          showNotification('Microphone access denied. Please allow microphone access and try again.', 'error', 8000);
+          updateSpeechStatus('error', 'Microphone access denied');
+          if (toggleTranscriptBtn) {
+            toggleTranscriptBtn.classList.remove('active');
+            toggleTranscriptBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>';
+          }
+          break;
+        case 'no-speech':
+          log('No speech detected, restarting...');
+          updateSpeechStatus('listening', 'No speech detected, listening...');
+          // Don't show notification for no-speech, just restart
+          break;
+        case 'audio-capture':
+          showNotification('Microphone not available. Please check your microphone.', 'error');
+          updateSpeechStatus('error', 'Microphone not available');
+          break;
+        case 'network':
+          showNotification('Network error during speech recognition. Retrying...', 'warning');
+          updateSpeechStatus('error', 'Network error, retrying...');
+          break;
+        default:
+          showNotification(`Speech recognition error: ${event.error}`, 'error');
+          updateSpeechStatus('error', `Error: ${event.error}`);
+      }
+    };
+
     speechRecognition.onend = () => {
-      if (joined) {
-        // Restart if still in meeting
-        setTimeout(() => {
-          if (speechRecognition && joined) {
-            speechRecognition.start();
+      log('Speech recognition ended');
+
+      // Hide interim display
+      if (interimTranscriptElement) {
+        interimTranscriptElement.style.display = 'none';
+      }
+
+      // Auto-restart if still in meeting and transcription is enabled
+      if (joined && toggleTranscriptBtn && toggleTranscriptBtn.classList.contains('active')) {
+        // Clear any existing restart timeout
+        if (recognitionRestartTimeout) {
+          clearTimeout(recognitionRestartTimeout);
+        }
+
+        // Restart after a short delay
+        recognitionRestartTimeout = setTimeout(() => {
+          if (joined && speechRecognition && toggleTranscriptBtn && toggleTranscriptBtn.classList.contains('active')) {
+            try {
+              speechRecognition.start();
+              log('Speech recognition restarted automatically');
+            } catch (error) {
+              log('Error restarting speech recognition:', error);
+              // Try again after a longer delay
+              setTimeout(() => {
+                if (joined && toggleTranscriptBtn && toggleTranscriptBtn.classList.contains('active')) {
+                  startSpeechRecognition();
+                }
+              }, 3000);
+            }
           }
         }, 1000);
       }
     };
-    
+
+    // Start recognition
     try {
       speechRecognition.start();
-      log('Speech recognition started');
+      log('Attempting to start speech recognition...');
     } catch (error) {
       log('Error starting speech recognition:', error);
+      showNotification('Failed to start speech recognition: ' + error.message, 'error');
+      isRecognitionActive = false;
     }
   }
   
@@ -1067,20 +1256,33 @@ document.addEventListener('DOMContentLoaded', () => {
   
   function toggleTranscript() {
     const isActive = toggleTranscriptBtn.classList.contains('active');
-    
+
     if (isActive) {
       // Stop speech recognition
       if (speechRecognition) {
         speechRecognition.stop();
         speechRecognition = null;
       }
+
+      // Clear any restart timeout
+      if (recognitionRestartTimeout) {
+        clearTimeout(recognitionRestartTimeout);
+        recognitionRestartTimeout = null;
+      }
+
+      // Hide interim transcript
+      if (interimTranscriptElement) {
+        interimTranscriptElement.style.display = 'none';
+      }
+
       toggleTranscriptBtn.classList.remove('active');
+      toggleTranscriptBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>';
+      updateSpeechStatus('inactive', 'Speech recognition disabled');
       showNotification('Live transcription disabled', 'info', 2000);
     } else {
       // Start speech recognition
       startSpeechRecognition();
-      toggleTranscriptBtn.classList.add('active');
-      showNotification('Live transcription enabled', 'success', 2000);
+      showNotification('Starting live transcription...', 'info', 2000);
     }
   }
   
