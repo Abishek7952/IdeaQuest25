@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>AgamAI — Multi-Party Call</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="app">
@@ -24,6 +26,22 @@
       </div>
     </header>
 
+    <!-- Quick Action Controls -->
+    <div class="quick-actions">
+      <button id="toggleVideo" class="action-btn" title="Toggle Video">
+        <i class="fas fa-video"></i>
+      </button>
+      <button id="toggleAudio" class="action-btn" title="Toggle Audio">
+        <i class="fas fa-microphone"></i>
+      </button>
+      <button id="shareScreen" class="action-btn" title="Share Screen">
+        <i class="fas fa-desktop"></i>
+      </button>
+      <button id="toggleTranscript" class="action-btn" title="Toggle Live Transcription">
+        <i class="fas fa-closed-captioning"></i>
+      </button>
+    </div>
+
     <main class="main">
       <section class="stage">
         <div class="grid-header">
@@ -31,6 +49,7 @@
           <div class="stats">
             <span>RTT: <strong id="rtt">—</strong> ms</span>
             <span>Packet loss: <strong id="pl">—</strong> %</span>
+            <span>Network: <strong id="netMode">normal</strong></span>
           </div>
         </div>
 
@@ -39,9 +58,17 @@
           <!-- Local tile -->
           <div id="wrap_local" class="video-tile local-tile">
             <video id="localVideo" autoplay muted playsinline></video>
-            <div class="tile-footer">
-              <div class="name">You</div>
-              <div class="meta">Local • <span id="localBadge" class="badge muted">Muted</span></div>
+            <div class="tile-overlay">
+              <div class="participant-info">
+                <div class="name">You</div>
+                <div class="status">
+                  <span id="localBadge" class="badge muted">Muted</span>
+                  <span class="attention-indicator">
+                    <i class="fas fa-eye"></i>
+                    <span id="localAttention">—</span>%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -54,45 +81,116 @@
       </section>
 
       <aside class="sidebar">
-        <div class="card">
-          <h3>Participants</h3>
-          <ul id="participantsList" class="participants">
-            <li class="placeholder">No participants yet</li>
-          </ul>
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+          <button class="tab-btn active" data-tab="participants">
+            <i class="fas fa-users"></i> Participants
+          </button>
+          <button class="tab-btn" data-tab="transcript">
+            <i class="fas fa-file-text"></i> Transcript
+          </button>
+          <button class="tab-btn" data-tab="insights">
+            <i class="fas fa-chart-line"></i> Insights
+          </button>
         </div>
 
-        <div class="card">
-          <h3>Live Transcript</h3>
-          <div id="transcriptBox" style="max-height:200px;overflow:auto;font-size:13px;"></div>
+        <!-- Participants Tab -->
+        <div id="participants-tab" class="tab-content active">
+          <div class="card">
+            <h3>Participants</h3>
+            <ul id="participantsList" class="participants">
+              <li class="placeholder">No participants yet</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h3>Meeting Stats</h3>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <div class="stat-label">Duration</div>
+                <div class="stat-value" id="meetingDuration">00:00</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">Avg Attention</div>
+                <div class="stat-value" id="avgAttention">—</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">Engagement</div>
+                <div class="stat-value" id="engagementScore">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Leaderboard</h3>
+            <div id="leaderboard" class="leaderboard">
+              <div class="placeholder">No data yet</div>
+            </div>
+          </div>
         </div>
 
-        <div class="card">
-          <h3>Summary & Action Items</h3>
-          <button id="summarizeBtn" class="btn outline">Generate Summary</button>
-          <div id="summaryBox" style="white-space:pre-wrap;font-size:13px;margin-top:8px;"></div>
+        <!-- Transcript Tab -->
+        <div id="transcript-tab" class="tab-content">
+          <div class="card">
+            <div class="card-header">
+              <h3>Live Transcript</h3>
+              <button id="downloadTranscript" class="btn-small">
+                <i class="fas fa-download"></i> Download
+              </button>
+            </div>
+            <div id="transcriptBox" class="transcript-container"></div>
+          </div>
+
+          <div class="card">
+            <h3>AI Summary & Action Items</h3>
+            <button id="summarizeBtn" class="btn outline">
+              <i class="fas fa-magic"></i> Generate Summary
+            </button>
+            <div id="summaryBox" class="summary-container"></div>
+          </div>
         </div>
 
-        <div class="card small">
-          <h4>Quick Metrics</h4>
-          <div>Network Mode: <strong id="netMode">normal</strong></div>
-          <div>Attention: <strong id="attScore">—</strong></div>
-        </div>
+        <!-- Insights Tab -->
+        <div id="insights-tab" class="tab-content">
+          <div class="card">
+            <h3>Sentiment Analysis</h3>
+            <div class="chart-container">
+              <canvas id="sentimentChart"></canvas>
+            </div>
+          </div>
 
-        <div class="card small">
-          <h4>Quick Tips</h4>
-          <ul class="tips">
-            <li>Use same room name to join peers.</li>
-            <li>TURN required for cross-network connectivity.</li>
-            <li>Use headset for better audio.</li>
-          </ul>
+          <div class="card">
+            <h3>Speaking Distribution</h3>
+            <div id="speakingChart" class="speaking-chart">
+              <div class="placeholder">No speaking data yet</div>
+            </div>
+          </div>
         </div>
       </aside>
     </main>
 
     <footer class="footer">
       <div>© AgamAI Labs — Hackathon Demo</div>
-      <div class="links"><a href="#" target="_blank">Docs</a> · <a href="#" target="_blank">Source</a></div>
+      <div class="links">
+        <a href="#" id="showDebug">Debug</a> ·
+        <a href="#" target="_blank">Docs</a> ·
+        <a href="#" target="_blank">Source</a>
+      </div>
     </footer>
+
+    <!-- Debug Console -->
+    <div id="debugConsole" class="debug-console">
+      <div class="debug-header">
+        <h4>Debug Console</h4>
+        <button id="toggleDebug" class="btn-close">×</button>
+      </div>
+      <div class="debug-content">
+        <pre id="debugLog"></pre>
+      </div>
+    </div>
+
+    <!-- Notifications Container -->
+    <div id="notifications" class="notifications-container"></div>
   </div>
 
   <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
