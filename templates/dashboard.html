@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AgamAI — Meeting Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dashboard-body">
+  <div class="dashboard-container">
+    <!-- Header -->
+    <header class="dashboard-header">
+      <div class="header-left">
+        <button class="back-btn" onclick="goBack()">
+          <i class="fas fa-arrow-left"></i>
+        </button>
+        <div class="brand">
+          <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M3 12a9 9 0 1118 0 9 9 0 01-18 0zm9-5a1 1 0 000 2 3 3 0 013 3 1 1 0 002 0 5 5 0 00-5-5z"/>
+          </svg>
+          <div>
+            <div class="title">Meeting Dashboard</div>
+            <div class="subtitle" id="roomTitle">Room: Loading...</div>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="live-indicator">
+          <div class="pulse-dot"></div>
+          <span>Live</span>
+        </div>
+        <button class="refresh-btn" onclick="refreshDashboard()">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-main">
+      <!-- AI Summary Section -->
+      <section class="dashboard-card summary-card">
+        <div class="card-header">
+          <h2><i class="fas fa-brain"></i> AI Summary & Action Items</h2>
+          <button id="generateSummaryBtn" class="btn primary">
+            <i class="fas fa-magic"></i> Generate Summary
+          </button>
+        </div>
+        <div class="card-content">
+          <div id="summaryContent" class="summary-content">
+            <div class="placeholder">
+              <i class="fas fa-robot"></i>
+              <p>Click "Generate Summary" to create an AI-powered meeting summary with action items and key insights.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sentiment Analysis -->
+      <section class="dashboard-card sentiment-card">
+        <div class="card-header">
+          <h2><i class="fas fa-heart"></i> Sentiment Analysis</h2>
+          <div class="sentiment-indicator">
+            <span id="overallSentiment">Neutral</span>
+            <div class="sentiment-emoji" id="sentimentEmoji">😐</div>
+          </div>
+        </div>
+        <div class="card-content">
+          <div class="chart-container">
+            <canvas id="sentimentChart"></canvas>
+          </div>
+          <div class="sentiment-stats">
+            <div class="stat-item">
+              <div class="stat-label">Positive</div>
+              <div class="stat-value positive" id="positivePercent">0%</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Neutral</div>
+              <div class="stat-value neutral" id="neutralPercent">0%</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Negative</div>
+              <div class="stat-value negative" id="negativePercent">0%</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Speaking Distribution -->
+      <section class="dashboard-card speaking-card">
+        <div class="card-header">
+          <h2><i class="fas fa-microphone"></i> Speaking Distribution</h2>
+          <div class="total-time">
+            <span>Total: <strong id="totalSpeakingTime">0:00</strong></span>
+          </div>
+        </div>
+        <div class="card-content">
+          <div id="speakingDistribution" class="speaking-distribution">
+            <div class="placeholder">
+              <i class="fas fa-chart-bar"></i>
+              <p>No speaking data available yet. Start the meeting to see distribution.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Meeting Metrics -->
+      <section class="dashboard-card metrics-card">
+        <div class="card-header">
+          <h2><i class="fas fa-chart-line"></i> Meeting Metrics</h2>
+        </div>
+        <div class="card-content">
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <div class="metric-icon">
+                <i class="fas fa-clock"></i>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Duration</div>
+                <div class="metric-value" id="meetingDuration">00:00</div>
+              </div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-icon">
+                <i class="fas fa-users"></i>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Participants</div>
+                <div class="metric-value" id="participantCount">0</div>
+              </div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-icon">
+                <i class="fas fa-eye"></i>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Avg Attention</div>
+                <div class="metric-value" id="avgAttention">—</div>
+              </div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-icon">
+                <i class="fas fa-fire"></i>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Engagement</div>
+                <div class="metric-value" id="engagementScore">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Participant Leaderboard -->
+      <section class="dashboard-card leaderboard-card">
+        <div class="card-header">
+          <h2><i class="fas fa-trophy"></i> Participant Leaderboard</h2>
+        </div>
+        <div class="card-content">
+          <div id="leaderboard" class="leaderboard">
+            <div class="placeholder">
+              <i class="fas fa-medal"></i>
+              <p>No participant data available yet.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent Transcript -->
+      <section class="dashboard-card transcript-card">
+        <div class="card-header">
+          <h2><i class="fas fa-file-text"></i> Recent Transcript</h2>
+          <button class="btn outline" onclick="downloadTranscript()">
+            <i class="fas fa-download"></i> Download
+          </button>
+        </div>
+        <div class="card-content">
+          <div id="recentTranscript" class="recent-transcript">
+            <div class="placeholder">
+              <i class="fas fa-microphone-slash"></i>
+              <p>No transcript data available yet.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

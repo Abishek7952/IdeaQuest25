@@ -51,6 +51,8 @@ a { color:var(--accent); text-decoration:none; }
 .btn { padding:10px 14px; border-radius:10px; border:0; cursor:pointer; font-weight:600; }
 .btn.primary { background: linear-gradient(90deg,var(--accent), #8b5cf6); color:#fff; box-shadow: 0 6px 20px rgba(99,102,241,0.14); }
 .btn.outline { background:transparent; border:1px solid rgba(255,255,255,0.06); color:#fff; }
+.btn.dashboard { background: linear-gradient(90deg, var(--secondary), var(--primary)); color:#fff; box-shadow: 0 6px 20px rgba(6,182,212,0.14); transition: all 0.3s ease; }
+.btn.dashboard:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(6,182,212,0.2); }
 
 /* --- main layout --- */
 .main { display:grid; grid-template-columns: 1fr 320px; gap:var(--gap); margin-top:18px; }

@@ -19,6 +19,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let audioContext = null;
   let analyser = null;
   let microphone = null;
+
+  // Dashboard navigation function
+  window.openDashboard = function() {
+    const currentRoom = room || 'testroom';
+    window.open(`/dashboard?room=${currentRoom}`, '_blank');
+  };
   
   // Elements
   const joinBtn = document.getElementById('joinBtn');
