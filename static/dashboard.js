@@ -25,7 +25,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function initializeSentimentChart() {
     const ctx = document.getElementById('sentimentChart').getContext('2d');
-    
+
+    // Create gradient for the chart
+    const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.3)');
+    gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.2)');
+    gradient.addColorStop(1, 'rgba(236, 72, 153, 0.1)');
+
+    const borderGradient = ctx.createLinearGradient(0, 0, 0, 200);
+    borderGradient.addColorStop(0, '#6366f1');
+    borderGradient.addColorStop(0.5, '#8b5cf6');
+    borderGradient.addColorStop(1, '#ec4899');
+
     sentimentChart = new Chart(ctx, {
       type: 'line',
       data: {
@@ -33,20 +44,32 @@ document.addEventListener('DOMContentLoaded', () => {
         datasets: [{
           label: 'Sentiment Score',
           data: [],
-          borderColor: '#6366f1',
-          backgroundColor: 'rgba(99, 102, 241, 0.1)',
-          borderWidth: 3,
+          borderColor: borderGradient,
+          backgroundColor: gradient,
+          borderWidth: 4,
           fill: true,
           tension: 0.4,
           pointBackgroundColor: '#6366f1',
           pointBorderColor: '#ffffff',
-          pointBorderWidth: 2,
-          pointRadius: 4
+          pointBorderWidth: 3,
+          pointRadius: 6,
+          pointHoverRadius: 8,
+          pointHoverBackgroundColor: '#8b5cf6',
+          pointHoverBorderColor: '#ffffff',
+          pointHoverBorderWidth: 3,
+          shadowOffsetX: 0,
+          shadowOffsetY: 4,
+          shadowBlur: 8,
+          shadowColor: 'rgba(99, 102, 241, 0.3)'
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        },
         plugins: {
           legend: {
             display: false
@@ -56,10 +79,20 @@ document.addEventListener('DOMContentLoaded', () => {
           x: {
             display: true,
             grid: {
-              color: 'rgba(255, 255, 255, 0.1)'
+              color: 'rgba(255, 255, 255, 0.08)',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              drawBorder: false
             },
             ticks: {
-              color: '#cbd5e1'
+              color: '#cbd5e1',
+              font: {
+                size: 12,
+                weight: '500'
+              },
+              maxTicksLimit: 8
+            },
+            border: {
+              display: false
             }
           },
           y: {
@@ -67,22 +100,40 @@ document.addEventListener('DOMContentLoaded', () => {
             min: -1,
             max: 1,
             grid: {
-              color: 'rgba(255, 255, 255, 0.1)'
+              color: 'rgba(255, 255, 255, 0.08)',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              drawBorder: false
             },
             ticks: {
               color: '#cbd5e1',
+              font: {
+                size: 12,
+                weight: '500'
+              },
               callback: function(value) {
-                if (value > 0.3) return 'Positive';
-                if (value < -0.3) return 'Negative';
-                return 'Neutral';
+                if (value > 0.3) return '😊 Positive';
+                if (value < -0.3) return '😞 Negative';
+                return '😐 Neutral';
               }
+            },
+            border: {
+              display: false
             }
           }
         },
         elements: {
           point: {
-            hoverRadius: 8
+            hoverRadius: 10,
+            borderWidth: 3
+          },
+          line: {
+            borderJoinStyle: 'round',
+            borderCapStyle: 'round'
           }
+        },
+        animation: {
+          duration: 1000,
+          easing: 'easeInOutQuart'
         }
       }
     });
@@ -277,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateSpeakingDistribution(distribution) {
     const container = document.getElementById('speakingDistribution');
-    
+
     if (!distribution || distribution.length === 0) {
       container.innerHTML = `
         <div class="placeholder">
@@ -288,24 +339,62 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const totalTime = distribution.reduce((sum, item) => sum + item.speaking_time, 0);
+    // Sort distribution by speaking time (descending)
+    const sortedDistribution = [...distribution].sort((a, b) => b.speaking_time - a.speaking_time);
+
+    const totalTime = sortedDistribution.reduce((sum, item) => sum + item.speaking_time, 0);
     document.getElementById('totalSpeakingTime').textContent = formatTime(totalTime);
 
-    container.innerHTML = distribution.map(item => {
+    // Generate avatar colors based on name
+    const getAvatarColor = (name) => {
+      const colors = [
+        'linear-gradient(45deg, #6366f1, #8b5cf6)',
+        'linear-gradient(45deg, #8b5cf6, #ec4899)',
+        'linear-gradient(45deg, #ec4899, #f59e0b)',
+        'linear-gradient(45deg, #f59e0b, #10b981)',
+        'linear-gradient(45deg, #10b981, #06b6d4)',
+        'linear-gradient(45deg, #06b6d4, #6366f1)'
+      ];
+      const hash = name.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+      return colors[hash % colors.length];
+    };
+
+    container.innerHTML = sortedDistribution.map((item, index) => {
       const percentage = totalTime > 0 ? (item.speaking_time / totalTime * 100) : 0;
+      const speakingTimeFormatted = formatTime(item.speaking_time);
+      const avatarColor = getAvatarColor(item.name);
+      const rank = index + 1;
+
       return `
-        <div class="speaking-item">
+        <div class="speaking-item" style="animation-delay: ${index * 0.1}s">
           <div class="speaker-info">
-            <div class="speaker-avatar">${item.name.charAt(0).toUpperCase()}</div>
-            <div class="speaker-name">${item.name}</div>
+            <div class="speaker-avatar" style="background: ${avatarColor}">
+              ${item.name.charAt(0).toUpperCase()}
+            </div>
+            <div class="speaker-details">
+              <div class="speaker-name">${item.name}</div>
+              <div class="speaker-time">${speakingTimeFormatted}</div>
+            </div>
+            ${rank <= 3 ? `<div class="rank-badge rank-${rank}">
+              ${rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
+            </div>` : ''}
           </div>
           <div class="speaking-bar">
-            <div class="speaking-progress" style="width: ${percentage}%"></div>
+            <div class="speaking-progress" style="width: 0%; animation-delay: ${index * 0.1 + 0.3}s" data-width="${percentage}%"></div>
           </div>
           <div class="speaking-percentage">${percentage.toFixed(1)}%</div>
         </div>
       `;
     }).join('');
+
+    // Animate progress bars
+    setTimeout(() => {
+      const progressBars = container.querySelectorAll('.speaking-progress');
+      progressBars.forEach(bar => {
+        const targetWidth = bar.getAttribute('data-width');
+        bar.style.width = targetWidth;
+      });
+    }, 100);
   }
 
   function updateSentimentChart(sentimentHistory) {
@@ -426,7 +515,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Event handlers
   window.goBack = function() {
-    window.history.back();
+    // Go back to main page with the current room
+    const currentRoom = room || 'testroom';
+    window.location.href = `/?room=${currentRoom}`;
   };
 
   window.refreshDashboard = function() {
