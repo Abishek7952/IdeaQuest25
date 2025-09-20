@@ -1662,43 +1662,68 @@ document.addEventListener('DOMContentLoaded', () => {
       showNotification('Join a meeting first', 'warning');
       return;
     }
-    
-    summaryBox.innerHTML = `
-      <div class="loading">
-        <i class="fas fa-spinner fa-spin"></i>
-        Generating AI summary...
-      </div>
-    `;
-    
+
+    const originalText = summarizeBtn.innerHTML;
+
+    summarizeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    summarizeBtn.disabled = true;
+
     try {
       const response = await fetch('/summarize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ room })
       });
-      
+
       const data = await response.json();
-      
-      if (data.error) {
+
+      if (data.result) {
+        summaryBox.innerHTML = `
+          <div class="summary-result">
+            <div class="summary-section">
+              <h4><i class="fas fa-file-text"></i> Meeting Summary</h4>
+              <p>${data.result.summary || 'No summary available'}</p>
+            </div>
+            <div class="summary-section">
+              <h4><i class="fas fa-list-check"></i> Action Items</h4>
+              <ul>
+                ${(data.result.action_items || []).map(item => `<li>${item}</li>`).join('')}
+              </ul>
+            </div>
+            <div class="summary-section">
+              <h4><i class="fas fa-heart"></i> Overall Emotion</h4>
+              <p>${data.result.overall_emotion || 'Neutral'}</p>
+            </div>
+          </div>
+        `;
+        showNotification('Summary generated successfully', 'success');
+      } else if (data.error) {
         summaryBox.innerHTML = `<div class="error">${data.error}</div>`;
         showNotification(data.error, 'warning');
       } else {
         summaryBox.innerHTML = `
           <div class="summary-content">
             <h4><i class="fas fa-file-text"></i> Meeting Summary</h4>
-            <div class="summary-text">${data.result || 'No summary available'}</div>
-            <div class="summary-meta">
-              <small>Generated from ${data.transcript_length || 0} transcript entries</small>
-            </div>
+            <div class="summary-text">No summary available</div>
           </div>
         `;
-        showNotification('Summary generated successfully', 'success');
+        showNotification('No summary data available', 'warning');
       }
-      
+
     } catch (error) {
       log('Error generating summary:', error);
-      summaryBox.innerHTML = '<div class="error">Failed to generate summary</div>';
+      summaryBox.innerHTML = `
+        <div class="error-message">
+          <i class="fas fa-exclamation-triangle"></i>
+          <p>Error generating summary. Please try again.</p>
+        </div>
+      `;
       showNotification('Failed to generate summary', 'error');
+    } finally {
+      summarizeBtn.innerHTML = originalText;
+      summarizeBtn.disabled = false;
     }
   });
   
