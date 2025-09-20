@@ -362,50 +362,44 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('generateSummaryBtn').addEventListener('click', async function() {
     const button = this;
     const originalText = button.innerHTML;
-    
+
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
     button.disabled = true;
-    
+
+    const summaryContent = document.getElementById('summaryContent');
+    summaryContent.innerHTML = `
+      <div class="loading">
+        <i class="fas fa-spinner fa-spin"></i>
+        Generating AI summary...
+      </div>
+    `;
+
     try {
       const response = await fetch('/summarize', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ room })
       });
-      
+
       const data = await response.json();
-      
-      if (data.result) {
-        document.getElementById('summaryContent').innerHTML = `
-          <div class="summary-result">
-            <div class="summary-section">
-              <h4><i class="fas fa-file-text"></i> Meeting Summary</h4>
-              <p>${data.result.summary || 'No summary available'}</p>
-            </div>
-            <div class="summary-section">
-              <h4><i class="fas fa-list-check"></i> Action Items</h4>
-              <ul>
-                ${(data.result.action_items || []).map(item => `<li>${item}</li>`).join('')}
-              </ul>
-            </div>
-            <div class="summary-section">
-              <h4><i class="fas fa-heart"></i> Overall Emotion</h4>
-              <p>${data.result.overall_emotion || 'Neutral'}</p>
+
+      if (data.error) {
+        summaryContent.innerHTML = `<div class="error">${data.error}</div>`;
+      } else {
+        summaryContent.innerHTML = `
+          <div class="summary-content">
+            <h4><i class="fas fa-file-text"></i> Meeting Summary</h4>
+            <div class="summary-text">${data.result || 'No summary available'}</div>
+            <div class="summary-meta">
+              <small>Generated from ${data.transcript_length || 0} transcript entries</small>
             </div>
           </div>
         `;
       }
-      
+
     } catch (error) {
       console.error('Error generating summary:', error);
-      document.getElementById('summaryContent').innerHTML = `
-        <div class="error-message">
-          <i class="fas fa-exclamation-triangle"></i>
-          <p>Error generating summary. Please try again.</p>
-        </div>
-      `;
+      summaryContent.innerHTML = '<div class="error">Failed to generate summary</div>';
     } finally {
       button.innerHTML = originalText;
       button.disabled = false;
