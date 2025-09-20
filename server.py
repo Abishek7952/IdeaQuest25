@@ -275,26 +275,23 @@ def get_engagement_data(room):
                 p["title"] = f"#{i+1} Participant"
             leaderboard.append(p)
         
-        # Calculate speaking distribution as array for dashboard
+        # Calculate speaking distribution
         total_speaking = sum(p["speaking_time"] for p in participants)
-        speaking_distribution = []
-
+        speaking_distribution = {}
+        
         for p in participants:
-            speaking_distribution.append({
-                "name": p["name"],
-                "speaking_time": p["speaking_time"],
-                "percentage": (p["speaking_time"] / total_speaking * 100) if total_speaking > 0 else 0
-            })
-
-        # Sort by speaking time
-        speaking_distribution.sort(key=lambda x: x["speaking_time"], reverse=True)
-
+            speaking_distribution[p["sid"]] = {
+                "time": p["speaking_time"],
+                "percentage": (p["speaking_time"] / total_speaking * 100) if total_speaking > 0 else 0,
+                "name": p["name"]
+            }
+        
         return jsonify({
             "room": room,
             "leaderboard": leaderboard,
             "speaking_distribution": speaking_distribution,
             "total_participants": len(participants),
-            "meeting_duration": time.time() - data.get("meeting_start", time.time())
+            "meeting_duration": time.time() - data["meeting_start"]
         })
         
     except Exception as e:

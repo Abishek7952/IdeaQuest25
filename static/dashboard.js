@@ -90,60 +90,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadDashboardData() {
     try {
-      // First check if we have any data, if not, populate with test data
-      const engagementResponse = await fetch(`/engagement/${room}`);
-      const engagementData = await engagementResponse.json();
-
-      // If no participants, add test data
-      if (!engagementData.leaderboard || engagementData.leaderboard.length === 0) {
-        console.log('No data found, populating with test data...');
-        await populateTestData();
-        // Wait a moment for data to be processed
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      // Load all dashboard data
+      // Load engagement data
       await loadEngagementData();
+      
+      // Load sentiment data
       await loadSentimentData();
+      
+      // Load transcript data
       await loadTranscriptData();
+      
+      // Load meeting metrics
       await loadMeetingMetrics();
-
+      
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      // Try to populate test data as fallback
-      try {
-        await populateTestData();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await loadEngagementData();
-        await loadSentimentData();
-        await loadTranscriptData();
-        await loadMeetingMetrics();
-      } catch (fallbackError) {
-        console.error('Fallback data loading failed:', fallbackError);
-      }
-    }
-  }
-
-  async function populateTestData() {
-    try {
-      const response = await fetch(`/test-data/${room}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Test data populated:', data);
-        return true;
-      } else {
-        console.error('Failed to populate test data:', response.status);
-        return false;
-      }
-    } catch (error) {
-      console.error('Error populating test data:', error);
-      return false;
     }
   }
 
@@ -471,45 +431,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.refreshDashboard = function() {
     loadDashboardData();
-
+    
     // Add visual feedback
     const refreshBtn = document.querySelector('.refresh-btn');
     refreshBtn.style.transform = 'rotate(360deg)';
     setTimeout(() => {
       refreshBtn.style.transform = 'rotate(0deg)';
     }, 300);
-  };
-
-  window.populateTestData = async function() {
-    const button = event.target;
-    const originalText = button.innerHTML;
-
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
-    button.disabled = true;
-
-    try {
-      const success = await populateTestData();
-      if (success) {
-        // Refresh dashboard data
-        await loadDashboardData();
-
-        // Show success message
-        button.innerHTML = '<i class="fas fa-check"></i> Added!';
-        setTimeout(() => {
-          button.innerHTML = originalText;
-          button.disabled = false;
-        }, 2000);
-      } else {
-        throw new Error('Failed to populate test data');
-      }
-    } catch (error) {
-      console.error('Error populating test data:', error);
-      button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error';
-      setTimeout(() => {
-        button.innerHTML = originalText;
-        button.disabled = false;
-      }, 2000);
-    }
   };
 
   // Utility function to format time
