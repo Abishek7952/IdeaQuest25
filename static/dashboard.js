@@ -8,19 +8,150 @@ document.addEventListener('DOMContentLoaded', () => {
   // Get room from URL parameters
   const urlParams = new URLSearchParams(window.location.search);
   room = urlParams.get('room') || 'testroom';
-  
+
   // Update room title
   document.getElementById('roomTitle').textContent = `Room: ${room}`;
 
   // Initialize dashboard
   initializeDashboard();
-  
-  // Set up auto-refresh
-  updateInterval = setInterval(refreshDashboard, 5000); // Refresh every 5 seconds
+
+  // Set up real-time event listeners
+  setupRealTimeListeners();
+
+  // Set up fallback polling (reduced frequency)
+  updateInterval = setInterval(refreshDashboard, 30000); // Fallback refresh every 30 seconds
 
   function initializeDashboard() {
     initializeSentimentChart();
     loadDashboardData();
+  }
+
+  function setupRealTimeListeners() {
+    console.log('Setting up real-time listeners for room:', room);
+
+    // Join the room for real-time updates
+    socket.emit('join-dashboard', { room: room });
+
+    // Listen for real-time transcript updates
+    socket.on('transcript-update', (data) => {
+      console.log('Real-time transcript update:', data);
+      if (data.room === room && data.entry) {
+        // Update recent transcript in real-time
+        updateSingleTranscriptEntry(data.entry);
+        // Refresh engagement data as speaking patterns change
+        loadEngagementData();
+        // Show brief notification
+        showToast('New message received', 'info');
+      }
+    });
+
+    // Listen for real-time sentiment updates
+    socket.on('sentiment-update', (data) => {
+      console.log('Real-time sentiment update:', data);
+      if (data.room === room) {
+        // Update sentiment chart and stats in real-time
+        loadSentimentData();
+        // Show brief notification for significant sentiment changes
+        if (Math.abs(data.sentiment) > 0.5) {
+          const sentimentType = data.sentiment > 0 ? 'positive' : 'negative';
+          showToast(`${sentimentType.charAt(0).toUpperCase() + sentimentType.slice(1)} sentiment detected`, 'info');
+        }
+      }
+    });
+
+    // Listen for attention updates
+    socket.on('attention-update', (data) => {
+      console.log('Real-time attention update:', data);
+      if (data.room === room) {
+        // Refresh engagement data as attention changes
+        loadEngagementData();
+      }
+    });
+
+    // Listen for participant join/leave events
+    socket.on('new-peer', (data) => {
+      console.log('New participant joined:', data);
+      // Refresh engagement data when participants change
+      loadEngagementData();
+    });
+
+    socket.on('peer-left', (data) => {
+      console.log('Participant left:', data);
+      // Refresh engagement data when participants change
+      loadEngagementData();
+    });
+
+    // Listen for connection events
+    socket.on('connect', () => {
+      console.log('Dashboard connected to server');
+      updateConnectionStatus('connected');
+      // Rejoin room on reconnection
+      socket.emit('join-dashboard', { room: room });
+      // Refresh all data on reconnection
+      loadDashboardData();
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Dashboard disconnected from server');
+      updateConnectionStatus('disconnected');
+    });
+
+    socket.on('dashboard-joined', (data) => {
+      console.log('Dashboard successfully joined room:', data.room);
+      updateConnectionStatus('live');
+    });
+  }
+
+  function updateConnectionStatus(status) {
+    const liveIndicator = document.querySelector('.live-indicator');
+    const pulseDot = document.querySelector('.pulse-dot');
+    const liveText = document.querySelector('.live-indicator span');
+
+    if (!liveIndicator || !pulseDot || !liveText) return;
+
+    // Remove existing status classes
+    liveIndicator.classList.remove('connected', 'disconnected', 'live');
+
+    switch (status) {
+      case 'connected':
+        liveIndicator.classList.add('connected');
+        liveText.textContent = 'Connected';
+        break;
+      case 'live':
+        liveIndicator.classList.add('live');
+        liveText.textContent = 'Live';
+        break;
+      case 'disconnected':
+        liveIndicator.classList.add('disconnected');
+        liveText.textContent = 'Offline';
+        break;
+      default:
+        liveText.textContent = 'Connecting...';
+    }
+
+    console.log('Connection status updated to:', status);
+  }
+
+  function showToast(message, type = 'info') {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+      <i class="fas fa-${type === 'info' ? 'info-circle' : type === 'success' ? 'check-circle' : 'exclamation-triangle'}"></i>
+      <span>${message}</span>
+    `;
+
+    // Add to page
+    document.body.appendChild(toast);
+
+    // Show toast
+    setTimeout(() => toast.classList.add('show'), 100);
+
+    // Remove toast after 3 seconds
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => document.body.removeChild(toast), 300);
+    }, 3000);
   }
 
   function initializeSentimentChart() {
@@ -383,11 +514,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log(`Sentiment percentages updated: ${positivePercent}% positive, ${neutralPercent}% neutral, ${negativePercent}% negative`);
   }
-  }
 
   function updateRecentTranscript(transcript) {
     const container = document.getElementById('recentTranscript');
-    
+
     if (!transcript || transcript.length === 0) {
       container.innerHTML = `
         <div class="placeholder">
@@ -404,6 +534,41 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="transcript-text">${entry.text}</div>
       </div>
     `).join('');
+  }
+
+  function updateSingleTranscriptEntry(entry) {
+    const container = document.getElementById('recentTranscript');
+
+    // Remove placeholder if it exists
+    const placeholder = container.querySelector('.placeholder');
+    if (placeholder) {
+      placeholder.remove();
+    }
+
+    // Create new transcript entry element
+    const entryElement = document.createElement('div');
+    entryElement.className = 'transcript-entry';
+    entryElement.innerHTML = `
+      <div class="transcript-speaker">${entry.speaker || 'Unknown'}</div>
+      <div class="transcript-text">${entry.text}</div>
+    `;
+
+    // Add to top of container
+    container.insertBefore(entryElement, container.firstChild);
+
+    // Keep only last 10 entries
+    const entries = container.querySelectorAll('.transcript-entry');
+    if (entries.length > 10) {
+      for (let i = 10; i < entries.length; i++) {
+        entries[i].remove();
+      }
+    }
+
+    // Add visual highlight for new entry
+    entryElement.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
+    setTimeout(() => {
+      entryElement.style.backgroundColor = '';
+    }, 2000);
   }
 
   function updateMeetingDuration() {

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Dashboard Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .test-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Real-time Dashboard Test</h1>
+        <div id="connectionStatus" class="status disconnected">Disconnected</div>
+        
+        <div class="test-controls">
+            <button onclick="connectToServer()">Connect to Server</button>
+            <button onclick="joinRoom()">Join Test Room</button>
+            <button onclick="sendTestMessage()">Send Test Message</button>
+            <button onclick="sendTestSentiment()">Send Test Sentiment</button>
+            <button onclick="addTestData()">Add Test Data</button>
+            <button onclick="openDashboard()">Open Dashboard</button>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Event Log</h2>
+        <div id="eventLog" class="log"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        let socket = null;
+        const room = 'testroom';
+        
+        function log(message) {
+            const logEl = document.getElementById('eventLog');
+            const timestamp = new Date().toLocaleTimeString();
+            logEl.innerHTML += `[${timestamp}] ${message}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function updateStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = `status ${status}`;
+            statusEl.textContent = message;
+        }
+        
+        function connectToServer() {
+            if (socket) {
+                socket.disconnect();
+            }
+            
+            socket = io();
+            
+            socket.on('connect', () => {
+                log('✓ Connected to server');
+                updateStatus('connected', 'Connected to Server');
+            });
+            
+            socket.on('disconnect', () => {
+                log('✗ Disconnected from server');
+                updateStatus('disconnected', 'Disconnected');
+            });
+            
+            socket.on('transcript-update', (data) => {
+                log(`📝 Transcript update: ${data.entry?.text?.substring(0, 50)}...`);
+            });
+            
+            socket.on('sentiment-update', (data) => {
+                log(`😊 Sentiment update: ${data.sentiment}`);
+            });
+            
+            socket.on('attention-update', (data) => {
+                log(`👁️ Attention update: ${data.score}`);
+            });
+            
+            socket.on('new-peer', (data) => {
+                log(`👤 New participant: ${data.peer}`);
+            });
+            
+            socket.on('peer-left', (data) => {
+                log(`👋 Participant left: ${data.sid}`);
+            });
+        }
+        
+        function joinRoom() {
+            if (!socket) {
+                log('❌ Not connected to server');
+                return;
+            }
+            
+            socket.emit('join', { room: room, name: 'Test User' });
+            socket.emit('join-dashboard', { room: room });
+            log(`🚪 Joined room: ${room}`);
+        }
+        
+        function sendTestMessage() {
+            if (!socket) {
+                log('❌ Not connected to server');
+                return;
+            }
+            
+            const messages = [
+                'This is a great meeting!',
+                'I love this new feature.',
+                'This is terrible and won\'t work.',
+                'Good progress on this project.',
+                'I\'m concerned about the timeline.'
+            ];
+            
+            const message = messages[Math.floor(Math.random() * messages.length)];
+            socket.emit('transcript-text', {
+                room: room,
+                text: message,
+                ts: Date.now() / 1000
+            });
+            log(`💬 Sent message: ${message}`);
+        }
+        
+        function sendTestSentiment() {
+            if (!socket) {
+                log('❌ Not connected to server');
+                return;
+            }
+            
+            const sentiment = (Math.random() - 0.5) * 2; // Random between -1 and 1
+            socket.emit('sentiment-update', {
+                room: room,
+                sentiment: sentiment
+            });
+            log(`😊 Sent sentiment: ${sentiment.toFixed(2)}`);
+        }
+        
+        async function addTestData() {
+            try {
+                const response = await fetch(`/test-data/${room}`, { method: 'POST' });
+                const data = await response.json();
+                log(`📊 Added test data: ${data.participants} participants, ${data.transcript_entries} messages`);
+            } catch (error) {
+                log(`❌ Error adding test data: ${error.message}`);
+            }
+        }
+        
+        function openDashboard() {
+            window.open(`/dashboard?room=${room}`, '_blank');
+            log(`🖥️ Opened dashboard for room: ${room}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.addEventListener('load', () => {
+            log('🚀 Real-time Dashboard Test loaded');
+            log('Click "Connect to Server" to start testing');
+        });
+    </script>
+</body>
+</html>
