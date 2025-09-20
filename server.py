@@ -173,6 +173,98 @@ def transcription_status():
         "timestamp": datetime.now().isoformat()
     })
 
+def parse_ai_summary(ai_response):
+    """
+    Parse the AI response text and extract structured data for the frontend.
+
+    Args:
+        ai_response: The formatted text response from the AI
+
+    Returns:
+        dict: Structured summary with summary, action_items, and overall_emotion
+    """
+    if not ai_response or not ai_response.strip():
+        return {
+            "summary": "No summary available",
+            "action_items": [],
+            "overall_emotion": "Neutral"
+        }
+
+    # Initialize result structure
+    result = {
+        "summary": "",
+        "action_items": [],
+        "overall_emotion": "Neutral"
+    }
+
+    # Split response into lines for parsing
+    lines = ai_response.split('\n')
+    current_section = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Detect sections
+        if line.startswith('📋 Summary:'):
+            current_section = 'summary'
+            continue
+        elif line.startswith('📝 Meeting Minutes:'):
+            current_section = 'minutes'
+            continue
+        elif line.startswith('✅ Action Items:'):
+            current_section = 'action_items'
+            continue
+        elif line.startswith('🎭 Meeting Sentiment:'):
+            current_section = 'sentiment'
+            continue
+        elif line.startswith('Generated on:'):
+            continue
+
+        # Process content based on current section
+        if current_section == 'summary' and line and not line.startswith(('📝', '✅', '🎭')):
+            if result["summary"]:
+                result["summary"] += " " + line
+            else:
+                result["summary"] = line
+        elif current_section == 'action_items' and line.startswith('- '):
+            # Clean up action item text
+            action_item = line[2:].strip()  # Remove "- " prefix
+            if action_item and action_item != "No clear action items identified in transcript":
+                result["action_items"].append(action_item)
+        elif current_section == 'sentiment':
+            if line.startswith('Overall tone:'):
+                # Extract emotion from "Overall tone: [Positive/Neutral/Negative]"
+                emotion_part = line.replace('Overall tone:', '').strip()
+                emotion_part = emotion_part.strip('[]')
+                if emotion_part in ['Positive', 'Neutral', 'Negative']:
+                    result["overall_emotion"] = emotion_part
+                elif 'positive' in emotion_part.lower():
+                    result["overall_emotion"] = "Positive"
+                elif 'negative' in emotion_part.lower():
+                    result["overall_emotion"] = "Negative"
+                else:
+                    result["overall_emotion"] = "Neutral"
+
+    # Fallback if no summary was extracted
+    if not result["summary"]:
+        # Try to extract first meaningful paragraph
+        paragraphs = [p.strip() for p in ai_response.split('\n\n') if p.strip()]
+        for paragraph in paragraphs:
+            if not paragraph.startswith(('📋', '📝', '✅', '🎭', 'Generated on:')):
+                result["summary"] = paragraph
+                break
+
+        if not result["summary"]:
+            result["summary"] = "Meeting summary generated successfully"
+
+    # Ensure we have at least one action item if none were found
+    if not result["action_items"]:
+        result["action_items"] = ["No specific action items identified"]
+
+    return result
+
 @app.route('/summarize', methods=['POST'])
 def summarize():
     if not SUMMARIZER_ENABLED:
@@ -189,18 +281,28 @@ def summarize():
 
     if not transcript_text.strip():
         return jsonify({
-            "error": "No transcript available",
-            "result": "No content to summarize",
-            "stats": {"word_count": 0, "transcript_length": 0}
+            "result": {
+                "summary": "No transcript available for this room",
+                "action_items": ["No content to analyze"],
+                "overall_emotion": "Neutral"
+            },
+            "room": room,
+            "transcript_length": 0,
+            "timestamp": datetime.now().isoformat(),
+            "stats": {"word_count": 0, "transcript_length": 0},
+            "ai_backend": "Gemini AI" if GEMINI_AVAILABLE else "Fallback"
         }), 200
 
     try:
-        # Generate AI summary
-        result = summarize_and_extract(
+        # Generate AI summary (returns formatted text)
+        ai_response = summarize_and_extract(
             transcript_text,
             include_sentiment=include_sentiment,
             include_action_items=include_action_items
         )
+
+        # Parse the AI response into structured format
+        structured_result = parse_ai_summary(ai_response)
 
         # Get transcript statistics
         stats = get_summary_stats(transcript_text) if get_summary_stats else {
@@ -217,7 +319,7 @@ def summarize():
 
         return jsonify({
             "room": room,
-            "result": result,
+            "result": structured_result,
             "transcript_length": len(transcript_entries),
             "timestamp": datetime.now().isoformat(),
             "stats": stats,
