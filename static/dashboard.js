@@ -269,12 +269,34 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.getElementById('sentimentEmoji').textContent = emojiMap[overall] || '😐';
 
-    // Update percentages
-    const total = stats.positive + stats.neutral + stats.negative;
-    if (total > 0) {
-      document.getElementById('positivePercent').textContent = Math.round(stats.positive / total * 100) + '%';
-      document.getElementById('neutralPercent').textContent = Math.round(stats.neutral / total * 100) + '%';
-      document.getElementById('negativePercent').textContent = Math.round(stats.negative / total * 100) + '%';
+    // Update percentages based on sentiment_history
+    if (sentimentData.sentiment_history && sentimentData.sentiment_history.length > 0) {
+      let positiveCount = 0;
+      let neutralCount = 0;
+      let negativeCount = 0;
+
+      // Count entries based on their scores
+      sentimentData.sentiment_history.forEach(entry => {
+        if (entry.score > 0.3) {
+          positiveCount++;
+        } else if (entry.score < -0.3) {
+          negativeCount++;
+        } else {
+          neutralCount++;
+        }
+      });
+
+      const total = sentimentData.sentiment_history.length;
+
+      // Calculate and update percentages
+      document.getElementById('positivePercent').textContent = Math.round(positiveCount / total * 100) + '%';
+      document.getElementById('neutralPercent').textContent = Math.round(neutralCount / total * 100) + '%';
+      document.getElementById('negativePercent').textContent = Math.round(negativeCount / total * 100) + '%';
+    } else {
+      // Fallback when no sentiment history is available
+      document.getElementById('positivePercent').textContent = '0%';
+      document.getElementById('neutralPercent').textContent = '0%';
+      document.getElementById('negativePercent').textContent = '0%';
     }
   }
 
