@@ -468,8 +468,6 @@ def on_disconnect():
             if request.sid in room_data[room]["participants"]:
                 del room_data[room]["participants"][request.sid]
             emit('peer-left', {"sid": request.sid}, room=room)
-            # Notify dashboard about participant leaving
-            emit('peer-left', {"sid": request.sid, "room": room}, room=f"dashboard_{room}")
             
             if not rooms[room]:  # Room is empty
                 del rooms[room]
@@ -499,10 +497,7 @@ def on_join(data):
     
     # Notify others about new peer
     emit('new-peer', {"peer": request.sid}, room=room, include_self=False)
-
-    # Notify dashboard about new participant
-    emit('new-peer', {"peer": request.sid, "room": room}, room=f"dashboard_{room}")
-
+    
     log.info(f"User {request.sid} joined room {room}")
 
 @socketio.on('leave')
@@ -516,10 +511,7 @@ def on_leave(data):
             del room_data[room]["participants"][request.sid]
         
         emit('peer-left', {"sid": request.sid}, room=room)
-
-        # Notify dashboard about participant leaving
-        emit('peer-left', {"sid": request.sid, "room": room}, room=f"dashboard_{room}")
-
+        
         if not rooms[room]:  # Room is empty
             del rooms[room]
             del room_data[room]
@@ -570,14 +562,6 @@ def handle_audio_chunk(data):
             log.warning("Transcription not enabled, ignoring audio chunk")
     except Exception as e:
         log.error(f"Error handling audio chunk: {e}")
-
-@socketio.on('join-dashboard')
-def handle_join_dashboard(data):
-    """Handle dashboard joining a room for real-time updates"""
-    room = data.get('room', 'default')
-    join_room(f"dashboard_{room}")
-    log.info(f"Dashboard joined room {room} for real-time updates")
-    emit('dashboard-joined', {"room": room})
 
 @socketio.on('transcript-text')
 def handle_transcript_text(data):
@@ -635,16 +619,9 @@ def handle_transcript_text(data):
         alert = detect_sentiment_alerts(room_data[room])
         if alert["alert"]:
             emit('sentiment-alert', alert, room=room)
-            emit('sentiment-alert', alert, room=f"dashboard_{room}")
 
-    # Broadcast sentiment update to dashboard
-    emit('sentiment-update', {"room": room, "sentiment": sentiment_score}, room=f"dashboard_{room}")
-
-    # Broadcast transcript update to meeting participants
+    # Broadcast transcript update
     emit('transcript-update', {"room": room, "entry": entry}, room=room)
-
-    # Also broadcast to dashboard listeners
-    emit('transcript-update', {"room": room, "entry": entry}, room=f"dashboard_{room}")
 
     log.info(f"Transcript from {request.sid} in {room}: {text[:50]}...")
 
@@ -700,11 +677,8 @@ def handle_attention(data):
         avg_attention = sum(attention_scores) / len(attention_scores)
         participant["engagement_score"] = (participant["engagement_score"] * 0.7) + (avg_attention * 0.3)
     
-    # Broadcast attention update to meeting participants
+    # Broadcast attention update
     emit('attention-update', {"sid": request.sid, "score": score}, room=room)
-
-    # Also broadcast to dashboard listeners
-    emit('attention-update', {"room": room, "sid": request.sid, "score": score}, room=f"dashboard_{room}")
 
 @socketio.on('network-stats')
 def handle_network_stats(data):
