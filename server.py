@@ -786,7 +786,7 @@ def handle_attention(data):
 def handle_network_stats(data):
     room = data.get('room', 'default')
     stats = data.get('stats', {})
-    
+
     # Store network stats
     room_data[room]["network_stats"][request.sid] = {
         "timestamp": time.time(),
@@ -794,7 +794,7 @@ def handle_network_stats(data):
         "packet_loss": stats.get("packet_loss", 0),
         "bandwidth": stats.get("bandwidth", 1000)
     }
-    
+
     # Evaluate network and suggest adaptation
     if NETWORK_ADAPTATION_ENABLED:
         try:
@@ -802,6 +802,33 @@ def handle_network_stats(data):
             emit('network-adaptation', {"mode": mode, "stats": stats})
         except Exception as e:
             log.error(f"Network adaptation error: {e}")
+
+@socketio.on('network-quality-change')
+def handle_network_quality_change(data):
+    """Handle network quality simulation changes from participants"""
+    room = data.get('room', 'default')
+    quality = data.get('quality', 100)
+    mode = data.get('mode', 'full-experience')
+    mode_label = data.get('modeLabel', 'Full Experience')
+    from_sid = data.get('from', request.sid)
+
+    log.info(f"Network quality change from {from_sid} in {room}: {quality}% ({mode_label})")
+
+    # Store the participant's current network quality state
+    if request.sid in room_data[room]["participants"]:
+        room_data[room]["participants"][request.sid]["network_quality"] = quality
+        room_data[room]["participants"][request.sid]["communication_mode"] = mode
+        room_data[room]["participants"][request.sid]["mode_label"] = mode_label
+
+    # Broadcast to other participants in the room (exclude sender)
+    emit('participant-network-quality-change', {
+        "room": room,
+        "quality": quality,
+        "mode": mode,
+        "modeLabel": mode_label,
+        "participantId": from_sid,
+        "timestamp": time.time()
+    }, room=room, include_self=False)
 
 def analyze_simple_sentiment(text):
     """Simple sentiment analysis"""

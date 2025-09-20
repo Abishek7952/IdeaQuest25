@@ -56,6 +56,37 @@
           </div>
         </div>
 
+        <!-- Network Quality Simulation Slider -->
+        <div class="network-quality-control">
+          <div class="control-header">
+            <label for="networkQualitySlider" class="control-label">
+              <i class="fas fa-wifi"></i>
+              Simulated Network Quality
+            </label>
+            <div class="quality-indicator">
+              <span id="qualityValue">100</span>%
+              <span id="qualityMode" class="quality-mode">Full Experience</span>
+            </div>
+          </div>
+          <div class="slider-container">
+            <input
+              type="range"
+              id="networkQualitySlider"
+              class="quality-slider"
+              min="0"
+              max="100"
+              value="100"
+              step="1"
+            />
+            <div class="slider-track-labels">
+              <span class="track-label transcription">Transcription</span>
+              <span class="track-label audio">Audio Only</span>
+              <span class="track-label degraded">Degraded Video</span>
+              <span class="track-label full">Full Experience</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Responsive grid: local + remotes -->
         <div id="remotesGrid" class="video-grid" aria-live="polite">
           <!-- Local tile -->

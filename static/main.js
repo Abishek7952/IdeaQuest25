@@ -55,6 +55,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleAudioBtn = document.getElementById('toggleAudio');
   const shareScreenBtn = document.getElementById('shareScreen');
   const toggleTranscriptBtn = document.getElementById('toggleTranscript');
+
+  // Network Quality Simulation
+  const networkQualitySlider = document.getElementById('networkQualitySlider');
+  const qualityValueEl = document.getElementById('qualityValue');
+  const qualityModeEl = document.getElementById('qualityMode');
+  let currentNetworkQuality = 100;
+  let currentCommunicationMode = 'full-experience';
   
   // WebRTC configuration
   const config = {
@@ -73,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeTabs();
   initializeCharts();
   initializeQuickActions();
+  initializeNetworkQualitySlider();
 
   // Initialize speech status
   updateSpeechStatus('inactive', 'Speech recognition inactive');
@@ -200,6 +208,18 @@ document.addEventListener('DOMContentLoaded', () => {
     shareScreenBtn.addEventListener('click', shareScreen);
     toggleTranscriptBtn.addEventListener('click', toggleTranscript);
   }
+
+  function initializeNetworkQualitySlider() {
+    if (!networkQualitySlider) return;
+
+    networkQualitySlider.addEventListener('input', (e) => {
+      const quality = parseInt(e.target.value);
+      handleNetworkQualityChange(quality);
+    });
+
+    // Initialize with default value
+    handleNetworkQualityChange(100);
+  }
   
   // Socket event handlers
   socket.on('connect', () => {
@@ -291,6 +311,11 @@ document.addEventListener('DOMContentLoaded', () => {
   socket.on('network-adaptation', (data) => {
     log('Network adaptation:', data.mode);
     handleNetworkAdaptation(data.mode, data.stats);
+  });
+
+  socket.on('participant-network-quality-change', (data) => {
+    log(`Participant ${data.participantId} changed network quality: ${data.quality}% (${data.modeLabel})`);
+    handleRemoteParticipantNetworkChange(data);
   });
   
   socket.on('nudge', (data) => {
@@ -1542,7 +1567,249 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
     }
   }
-  
+
+  // Network Quality Simulation State Machine
+  function handleNetworkQualityChange(quality) {
+    currentNetworkQuality = quality;
+
+    // Update UI indicators
+    if (qualityValueEl) qualityValueEl.textContent = quality;
+
+    // Determine communication mode based on quality
+    let newMode;
+    let modeLabel;
+    let modeColor;
+
+    if (quality >= 75) {
+      newMode = 'full-experience';
+      modeLabel = 'Full Experience';
+      modeColor = 'var(--success)';
+    } else if (quality >= 50) {
+      newMode = 'degraded-video';
+      modeLabel = 'Degraded Video';
+      modeColor = 'var(--info)';
+    } else if (quality >= 25) {
+      newMode = 'audio-only';
+      modeLabel = 'Audio Only';
+      modeColor = 'var(--warning)';
+    } else {
+      newMode = 'transcription-only';
+      modeLabel = 'Transcription Only';
+      modeColor = 'var(--danger)';
+    }
+
+    // Update mode indicator
+    if (qualityModeEl) {
+      qualityModeEl.textContent = modeLabel;
+      qualityModeEl.style.background = modeColor;
+    }
+
+    // Apply mode changes if different from current
+    if (newMode !== currentCommunicationMode) {
+      const previousMode = currentCommunicationMode;
+      currentCommunicationMode = newMode;
+
+      log(`Network quality changed: ${quality}% -> ${modeLabel}`);
+      applyCommunicationMode(newMode);
+
+      // Broadcast state change to other participants
+      if (joined && room) {
+        socket.emit('network-quality-change', {
+          room: room,
+          quality: quality,
+          mode: newMode,
+          modeLabel: modeLabel,
+          from: socket.id
+        });
+      }
+
+      showNotification(`Network mode: ${modeLabel}`, 'info', 3000);
+    }
+  }
+
+  function applyCommunicationMode(mode) {
+    if (!localStream) return;
+
+    const videoTracks = localStream.getVideoTracks();
+    const audioTracks = localStream.getAudioTracks();
+    const localVideoElement = document.getElementById('localVideo');
+    const localTile = document.getElementById('wrap_local');
+
+    switch (mode) {
+      case 'full-experience':
+        // Enable high-quality video and audio
+        videoTracks.forEach(track => {
+          track.enabled = true;
+          track.applyConstraints({
+            frameRate: { ideal: 30 },
+            height: { ideal: 720 },
+            width: { ideal: 1280 }
+          }).catch(err => log('Error applying full quality constraints:', err));
+        });
+        audioTracks.forEach(track => track.enabled = true);
+
+        // Show local video
+        if (localVideoElement) localVideoElement.style.display = 'block';
+        if (localTile) localTile.classList.remove('audio-only', 'transcription-only');
+
+        // Update quick action buttons
+        toggleVideoBtn.classList.add('active');
+        toggleAudioBtn.classList.add('active');
+
+        // Update local badge
+        localBadge.textContent = 'Live';
+        localBadge.className = 'badge live';
+        break;
+
+      case 'degraded-video':
+        // Enable degraded video and full audio
+        videoTracks.forEach(track => {
+          track.enabled = true;
+          track.applyConstraints({
+            frameRate: { ideal: 15 },
+            height: { ideal: 360 },
+            width: { ideal: 640 }
+          }).catch(err => log('Error applying degraded quality constraints:', err));
+        });
+        audioTracks.forEach(track => track.enabled = true);
+
+        // Show local video
+        if (localVideoElement) localVideoElement.style.display = 'block';
+        if (localTile) localTile.classList.remove('audio-only', 'transcription-only');
+
+        // Update quick action buttons
+        toggleVideoBtn.classList.add('active');
+        toggleAudioBtn.classList.add('active');
+
+        // Update local badge
+        localBadge.textContent = 'Low Quality';
+        localBadge.className = 'badge degraded';
+        break;
+
+      case 'audio-only':
+        // Disable video, enable audio
+        videoTracks.forEach(track => track.enabled = false);
+        audioTracks.forEach(track => track.enabled = true);
+
+        // Hide local video and show avatar
+        if (localVideoElement) localVideoElement.style.display = 'none';
+        if (localTile) {
+          localTile.classList.add('audio-only');
+          localTile.classList.remove('transcription-only');
+        }
+
+        // Update quick action buttons
+        toggleVideoBtn.classList.remove('active');
+        toggleAudioBtn.classList.add('active');
+
+        // Update local badge
+        localBadge.textContent = 'Audio Only';
+        localBadge.className = 'badge audio-only';
+        break;
+
+      case 'transcription-only':
+        // Disable both video and audio
+        videoTracks.forEach(track => track.enabled = false);
+        audioTracks.forEach(track => track.enabled = false);
+
+        // Hide local video and show transcription indicator
+        if (localVideoElement) localVideoElement.style.display = 'none';
+        if (localTile) {
+          localTile.classList.add('transcription-only');
+          localTile.classList.remove('audio-only');
+        }
+
+        // Update quick action buttons
+        toggleVideoBtn.classList.remove('active');
+        toggleAudioBtn.classList.remove('active');
+
+        // Update local badge
+        localBadge.textContent = 'Text Only';
+        localBadge.className = 'badge transcription';
+        break;
+    }
+
+    log(`Applied communication mode: ${mode}`);
+  }
+
+  function handleRemoteParticipantNetworkChange(data) {
+    const { participantId, mode, modeLabel, quality } = data;
+    const remoteVideoElement = document.getElementById(`video_${participantId}`);
+    const remoteTile = document.getElementById(`wrap_${participantId}`);
+
+    if (!remoteTile) {
+      log(`Remote tile not found for participant ${participantId}`);
+      return;
+    }
+
+    log(`Updating remote participant ${participantId} UI for mode: ${mode}`);
+
+    // Remove all mode classes first
+    remoteTile.classList.remove('audio-only', 'transcription-only', 'degraded-video');
+
+    // Update the remote participant's UI based on their network quality mode
+    switch (mode) {
+      case 'full-experience':
+        // Show video normally
+        if (remoteVideoElement) {
+          remoteVideoElement.style.display = 'block';
+          remoteVideoElement.style.opacity = '1';
+        }
+        break;
+
+      case 'degraded-video':
+        // Show video but indicate degraded quality
+        if (remoteVideoElement) {
+          remoteVideoElement.style.display = 'block';
+          remoteVideoElement.style.opacity = '0.8';
+        }
+        remoteTile.classList.add('degraded-video');
+        break;
+
+      case 'audio-only':
+        // Hide video and show audio-only indicator
+        if (remoteVideoElement) {
+          remoteVideoElement.style.display = 'none';
+        }
+        remoteTile.classList.add('audio-only');
+        break;
+
+      case 'transcription-only':
+        // Hide video and show transcription-only indicator
+        if (remoteVideoElement) {
+          remoteVideoElement.style.display = 'none';
+        }
+        remoteTile.classList.add('transcription-only');
+        break;
+    }
+
+    // Update the participant's badge/status if it exists
+    const participantBadge = remoteTile.querySelector('.badge');
+    if (participantBadge) {
+      switch (mode) {
+        case 'full-experience':
+          participantBadge.textContent = 'Live';
+          participantBadge.className = 'badge live';
+          break;
+        case 'degraded-video':
+          participantBadge.textContent = 'Low Quality';
+          participantBadge.className = 'badge degraded';
+          break;
+        case 'audio-only':
+          participantBadge.textContent = 'Audio Only';
+          participantBadge.className = 'badge audio-only';
+          break;
+        case 'transcription-only':
+          participantBadge.textContent = 'Text Only';
+          participantBadge.className = 'badge transcription';
+          break;
+      }
+    }
+
+    // Show a brief notification about the participant's state change
+    showNotification(`${participantId.slice(0, 8)} switched to ${modeLabel}`, 'info', 2000);
+  }
+
   // Quick Actions
   function toggleVideo() {
     if (!localStream) return;
